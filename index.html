@@ -559,6 +559,7 @@ function drawMeter(){
   $('#m-gifts').textContent=g.length?'贈品：'+g.join('　/　'):'尚未達到任何贈品門檻';
 
   renderGiftPickSelect(T);
+  renderRedeemBox();
 
   const lp=$('#chip-linepay');
   if(t<8000){
@@ -608,9 +609,13 @@ function redeemBump(name,d){
   if(!redeemCart[name])delete redeemCart[name];
   renderRedeemBox();
 }
+function currentAvailableCash(){
+  return editId ? editingCash : tier(subtotal()).cash;
+}
 function renderRedeemBox(){
   const eb=$('#redeem-eyebrow'), box=$('#redeembox');
-  if(!editId || editingCash<=0){ eb.style.display='none'; box.style.display='none'; return; }
+  const availableCash=currentAvailableCash();
+  if(!availableCash){ eb.style.display='none'; box.style.display='none'; return; }
   eb.style.display='flex'; box.style.display='block';
   $('#redeem-list').innerHTML=FULL_ITEMS.map(it=>{
     const q=redeemCart[it.name]||0;
@@ -627,9 +632,9 @@ function renderRedeemBox(){
       </div></div>`;
   }).join('');
   const total=FULL_ITEMS.reduce((s,it)=>s+(redeemCart[it.name]||0)*it.price,0);
-  const usedCash=Math.min(total,editingCash);
-  const owe=Math.max(0,total-editingCash);
-  $('#redeem-summary').innerHTML=`兌換總額 ${nt(total)}　回饋金可折抵 ${nt(usedCash)}（共有 ${nt(editingCash)}）${owe?`　<b style="color:var(--warn)">需補差價 ${nt(owe)}</b>`:''}`;
+  const usedCash=Math.min(total,availableCash);
+  const owe=Math.max(0,total-availableCash);
+  $('#redeem-summary').innerHTML=`兌換總額 ${nt(total)}　回饋金可折抵 ${nt(usedCash)}（共有 ${nt(availableCash)}）${owe?`　<b style="color:var(--warn)">需補差價 ${nt(owe)}</b>`:''}`;
 }
 function renderGiftPickSelect(T){
   const box=$('#giftpickbox');
