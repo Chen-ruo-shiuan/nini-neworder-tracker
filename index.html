@@ -220,6 +220,10 @@ body.unlocked #lockscreen{display:none}
       <label class="fl">純露——這筆訂單要給哪一款？</label>
       <div class="chips" id="gp-hydrosol-chips"></div>
     </div>
+    <div id="gp-fixed-wrap" style="margin-top:14px">
+      <label class="fl">固定加贈——打包時記得放入</label>
+      <div class="chips" id="gp-fixed-chips"></div>
+    </div>
     <div class="hint">點選要送的品項，會自動對照「叫貨」分頁的庫存算剩餘量。</div>
   </div>
 
@@ -346,6 +350,7 @@ let orders=[], cart={}, editId=null;
 let giftMeta={plus10k:[],cooler:[],stock:[],serumStock:{},hydrosolStock:{}};
 let sel={paymethod:'',paystatus:'未付款',ship:'待叫貨'};
 let giftPickState={giftSerum:'',giftHydrosol:''};
+let checkedFixedItems=new Set();
 
 function parseGiftItems(v){
   if(Array.isArray(v)) return v;
@@ -567,6 +572,19 @@ function pickGiftChip(field,name){
   giftPickState[field]=(giftPickState[field]===name)?'':name;
   drawMeter();
 }
+function toggleFixedChip(name){
+  if(checkedFixedItems.has(name)) checkedFixedItems.delete(name);
+  else checkedFixedItems.add(name);
+  drawMeter();
+}
+function buildFixedChips(){
+  const items=(giftMeta.plus10k||[]).filter(it=>it.name);
+  $('#gp-fixed-wrap').style.display=items.length?'block':'none';
+  $('#gp-fixed-chips').innerHTML=items.map(it=>{
+    const active=checkedFixedItems.has(it.name);
+    return `<button type="button" class="chip" aria-pressed="${active}" onclick="toggleFixedChip('${it.name.replace(/'/g,"\\'")}')">${it.name}×${it.qty||1}${active?' ✓':''}</button>`;
+  }).join('');
+}
 function renderGiftPickSelect(T){
   const box=$('#giftpickbox');
   const isPlus10k=plusOpen()&&T.plus==='plus10k';
@@ -575,7 +593,8 @@ function renderGiftPickSelect(T){
   box.style.display='block';
   $('#gp-hydrosol-wrap').style.display=isPlus10k?'block':'none';
   buildGiftChips('#gp-serum-chips',SERUMS,'giftSerum');
-  if(isPlus10k) buildGiftChips('#gp-hydrosol-chips',HYDROSOLS,'giftHydrosol');
+  if(isPlus10k){ buildGiftChips('#gp-hydrosol-chips',HYDROSOLS,'giftHydrosol'); buildFixedChips(); }
+  else{ $('#gp-fixed-wrap').style.display='none'; }
 }
 function giftPickTally(tierKey){
   const serumCounts={}, hydrosolCounts={};
@@ -627,6 +646,7 @@ function resetForm(){
   cart={};editId=null;
   $('#f-name').value='';$('#f-contact').value='';$('#f-note').value='';$('#f-dep').value='';
   giftPickState={giftSerum:'',giftHydrosol:''};
+  checkedFixedItems=new Set();
   setChip('paymethod','');setChip('paystatus','未付款');setChip('ship','待叫貨');
   $('#savebtn').textContent='儲存訂單';$('#cancelbtn').style.display='none';
   drawProducts();drawMeter();
@@ -637,6 +657,7 @@ function edit(id){
   $('#f-name').value=o.name;$('#f-contact').value=o.contact||'';$('#f-note').value=o.note||'';
   $('#f-dep').value=o.deposit||'';
   giftPickState={giftSerum:o.giftSerum||'',giftHydrosol:o.giftHydrosol||''};
+  checkedFixedItems=new Set();
   setChip('paymethod',o.paymethod||'');setChip('paystatus',o.paystatus);setChip('ship',o.ship);
   $('#savebtn').textContent='更新訂單';$('#cancelbtn').style.display='block';
   tab('new');window.scrollTo({top:0,behavior:'smooth'});
