@@ -230,7 +230,11 @@ body.unlocked #lockscreen{display:none}
   <div class="eyebrow" id="redeem-eyebrow" style="display:none">回饋金兌換（正裝）</div>
   <div class="card" id="redeembox" style="display:none">
     <div id="redeem-list"></div>
-    <div class="hint" id="redeem-summary"></div>
+    <div class="hint" id="redeem-detail"></div>
+    <div id="redeem-owebox" style="display:none;margin-top:12px;padding:12px;border-radius:3px;background:var(--rose-tint);text-align:center">
+      <div style="font-size:11.5px;color:var(--rose-dp);letter-spacing:.08em">現在要跟客人收</div>
+      <div class="num" style="font-family:var(--serif);font-size:26px;font-weight:700;color:var(--rose-dp)" id="redeem-owe">NT$0</div>
+    </div>
   </div>
 
   <div class="eyebrow">付款</div>
@@ -316,6 +320,8 @@ body.unlocked #lockscreen{display:none}
   <div class="card" id="quota"></div>
   <div class="eyebrow">回饋金總額</div>
   <div class="card" id="cashback"></div>
+  <div class="eyebrow">原液純露兌換金額（正裝，跟保養品分開算）</div>
+  <div class="card" id="redeemsum"></div>
   <button class="btn ghost" onclick="wipe()">清除所有資料</button>
 </section>
 
@@ -634,7 +640,9 @@ function renderRedeemBox(){
   const total=FULL_ITEMS.reduce((s,it)=>s+(redeemCart[it.name]||0)*it.price,0);
   const usedCash=Math.min(total,availableCash);
   const owe=Math.max(0,total-availableCash);
-  $('#redeem-summary').innerHTML=`兌換總額 ${nt(total)}　回饋金可折抵 ${nt(usedCash)}（共有 ${nt(availableCash)}）${owe?`　<b style="color:var(--warn)">需補差價 ${nt(owe)}</b>`:''}`;
+  $('#redeem-detail').innerHTML=`兌換總額 ${nt(total)}　回饋金可折抵 ${nt(usedCash)}（共有 ${nt(availableCash)}）`;
+  $('#redeem-owebox').style.display=total>0?'block':'none';
+  $('#redeem-owe').textContent=nt(owe);
 }
 function renderGiftPickSelect(T){
   const box=$('#giftpickbox');
@@ -943,6 +951,11 @@ function renderSum(){
   const cb=orders.reduce((s,o)=>s+(o.cash||0),0);
   $('#cashback').innerHTML=`<div style="font-size:22px;font-weight:700" class="num">${nt(cb)}</div>
     <div style="font-size:12.5px;color:var(--ink-60);margin-top:5px">限用於原液・純露。這是已經預約好的下一次回購，記得追。</div>`;
+
+  const redeemTotal=orders.reduce((s,o)=>s+Object.entries(o.redeemItems||{}).reduce((s2,[n,q])=>s2+(Number(q)||0)*fullPriceByName(n),0),0);
+  const net=t+redeemTotal-cb;
+  $('#redeemsum').innerHTML=`<div style="font-size:22px;font-weight:700" class="num">${nt(redeemTotal)}</div>
+    <div style="font-size:12.5px;color:var(--ink-60);margin-top:5px">保養品 ${nt(t)}　+　原液純露 ${nt(redeemTotal)}　−　回饋金 ${nt(cb)}　＝　實際進帳約 <b style="color:var(--ink)">${nt(net)}</b></div>`;
 }
 function renderAll(){drawProducts();drawMeter();renderList();renderBuy();renderSum();}
 
