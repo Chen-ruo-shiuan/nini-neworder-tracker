@@ -227,6 +227,12 @@ body.unlocked #lockscreen{display:none}
     <div class="hint">點選要送的品項，會自動對照「叫貨」分頁的庫存算剩餘量。</div>
   </div>
 
+  <div class="eyebrow" id="redeem-eyebrow" style="display:none">回饋金兌換（正裝）</div>
+  <div class="card" id="redeembox" style="display:none">
+    <div id="redeem-list"></div>
+    <div class="hint" id="redeem-summary"></div>
+  </div>
+
   <div class="eyebrow">付款</div>
   <div class="card">
     <label class="fl">方式</label>
@@ -279,9 +285,15 @@ body.unlocked #lockscreen{display:none}
   <div class="card"><table id="gifttable"></table></div>
   <div class="eyebrow">贈品內容物採購統計</div>
   <div class="card"><table id="giftneeds"></table></div>
+  <div class="eyebrow">正裝兌換庫存統計（回饋金換購，現貨售完為止）</div>
+  <div class="card"><table id="fullneeds"></table></div>
   <details id="giftmeta-details">
     <summary class="eyebrow">贈品內容物設定</summary>
     <div class="card" id="giftmeta"></div>
+  </details>
+  <details id="fullstock-details">
+    <summary class="eyebrow">正裝庫存設定</summary>
+    <div class="card" id="fullstockmeta"></div>
   </details>
   <button class="btn ghost" onclick="exportCSV()">匯出 CSV（給廠商或對帳用）</button>
 </section>
@@ -345,12 +357,17 @@ const GIFTS={
 };
 const SERUMS=['EGF','神經醯胺','積雪草','藍銅胜肽','穀胱甘肽','兒茶素','維他命C','B3','B5'];
 const HYDROSOLS=['洋甘菊','千葉玫瑰','桂花','橙花','葡萄柚'];
+const SERUM_FULL_PRICE={EGF:1300,'神經醯胺':1200,'積雪草':900,'穀胱甘肽':1000,'藍銅胜肽':1200,'B5':750,'B3':900,'維他命C':850,'兒茶素':700};
+const HYDROSOL_FULL_PRICE={'洋甘菊':550,'千葉玫瑰':550,'桂花':550,'橙花':550,'葡萄柚':350};
+const FULL_ITEMS=[...SERUMS.map(n=>({name:n,price:SERUM_FULL_PRICE[n],cat:'serum',spec:'原液 30ml'})), ...HYDROSOLS.map(n=>({name:n,price:HYDROSOL_FULL_PRICE[n],cat:'hydrosol',spec:'純露 100ml'}))];
 
 let orders=[], cart={}, editId=null;
-let giftMeta={plus10k:[],cooler:[],stock:[],serumStock:{},hydrosolStock:{}};
+let giftMeta={plus10k:[],cooler:[],stock:[],serumStock:{},hydrosolStock:{},serumStockFull:{},hydrosolStockFull:{}};
 let sel={paymethod:'',paystatus:'未付款',ship:'待叫貨'};
 let giftPickState={giftSerum:'',giftHydrosol:''};
 let checkedFixedItems=new Set();
+let redeemCart={};
+let editingCash=0;
 
 function parseGiftItems(v){
   if(Array.isArray(v)) return v;
@@ -414,6 +431,7 @@ const apiListGift=async()=> (await apiGet({action:'listgift'})).gift;
 const apiUpsert=o=>apiGet({action:'upsert', id:o.id, name:o.name, contact:o.contact,
   items:JSON.stringify(o.items), total:o.total, cash:o.cash, cooler:String(!!o.cooler),
   plus:o.plus||'', giftSerum:o.giftSerum||'', giftHydrosol:o.giftHydrosol||'',
+  redeemItems:JSON.stringify(o.redeemItems||{}),
   paymethod:o.paymethod||'', paystatus:o.paystatus, deposit:o.deposit,
   ship:o.ship, note:o.note, date:o.date});
 const apiDelete=id=>apiGet({action:'delete', id});
@@ -449,7 +467,7 @@ async function syncFromCloud(){
     const [os,g]=await Promise.all([apiListOrders(), apiListGift()]);
     orders=os.sort((a,b)=>new Date(b.date)-new Date(a.date));
     Object.keys(g).forEach(k=>{
-      if(k==='serumStock'||k==='hydrosolStock') giftMeta[k]={...giftMeta[k],...parseGiftMap(g[k])};
+      if(k==='serumStock'||k==='hydrosolStock'||k==='serumStockFull'||k==='hydrosolStockFull') giftMeta[k]={...giftMeta[k],...parseGiftMap(g[k])};
       else giftMeta[k]=parseGiftItems(g[k]);
     });
     saveCache(); saveGiftCache();
@@ -585,6 +603,34 @@ function buildFixedChips(){
     return `<button type="button" class="chip" aria-pressed="${active}" onclick="toggleFixedChip('${it.name.replace(/'/g,"\\'")}')">${it.name}×${it.qty||1}${active?' ✓':''}</button>`;
   }).join('');
 }
+function redeemBump(name,d){
+  redeemCart[name]=Math.max(0,(redeemCart[name]||0)+d);
+  if(!redeemCart[name])delete redeemCart[name];
+  renderRedeemBox();
+}
+function renderRedeemBox(){
+  const eb=$('#redeem-eyebrow'), box=$('#redeembox');
+  if(!editId || editingCash<=0){ eb.style.display='none'; box.style.display='none'; return; }
+  eb.style.display='flex'; box.style.display='block';
+  $('#redeem-list').innerHTML=FULL_ITEMS.map(it=>{
+    const q=redeemCart[it.name]||0;
+    return `<div class="pline ${q?'picked':''}">
+      <div class="pinfo">
+        <div class="pstep">${it.spec}</div>
+        <div class="pname">${it.name}</div>
+        <div class="pprice num">${nt(it.price)}</div>
+      </div>
+      <div class="stp">
+        <button onclick="redeemBump('${it.name}',-1)" ${q?'':'disabled'} aria-label="減少">−</button>
+        <span class="q num ${q?'':'zero'}">${q}</span>
+        <button onclick="redeemBump('${it.name}',1)" aria-label="增加">＋</button>
+      </div></div>`;
+  }).join('');
+  const total=FULL_ITEMS.reduce((s,it)=>s+(redeemCart[it.name]||0)*it.price,0);
+  const usedCash=Math.min(total,editingCash);
+  const owe=Math.max(0,total-editingCash);
+  $('#redeem-summary').innerHTML=`兌換總額 ${nt(total)}　回饋金可折抵 ${nt(usedCash)}（共有 ${nt(editingCash)}）${owe?`　<b style="color:var(--warn)">需補差價 ${nt(owe)}</b>`:''}`;
+}
 function renderGiftPickSelect(T){
   const box=$('#giftpickbox');
   const isPlus10k=plusOpen()&&T.plus==='plus10k';
@@ -631,6 +677,7 @@ async function save(){
     plus,
     giftSerum:(plus==='plus10k'||plus==='plus8k'||plus==='plus4k')?(giftPickState.giftSerum||''):'',
     giftHydrosol:plus==='plus10k'?(giftPickState.giftHydrosol||''):'',
+    redeemItems:{...redeemCart},
     paymethod:sel.paymethod, paystatus:sel.paystatus,
     deposit:sel.paystatus==='已付訂金'?Number($('#f-dep').value||0):(sel.paystatus==='已付清'?t:0),
     ship:sel.ship, note:$('#f-note').value.trim(),
@@ -647,9 +694,10 @@ function resetForm(){
   $('#f-name').value='';$('#f-contact').value='';$('#f-note').value='';$('#f-dep').value='';
   giftPickState={giftSerum:'',giftHydrosol:''};
   checkedFixedItems=new Set();
+  redeemCart={};editingCash=0;
   setChip('paymethod','');setChip('paystatus','未付款');setChip('ship','待叫貨');
   $('#savebtn').textContent='儲存訂單';$('#cancelbtn').style.display='none';
-  drawProducts();drawMeter();
+  drawProducts();drawMeter();renderRedeemBox();
 }
 function edit(id){
   const o=orders.find(x=>x.id===id);if(!o)return;
@@ -658,10 +706,11 @@ function edit(id){
   $('#f-dep').value=o.deposit||'';
   giftPickState={giftSerum:o.giftSerum||'',giftHydrosol:o.giftHydrosol||''};
   checkedFixedItems=new Set();
+  redeemCart={...(o.redeemItems||{})};editingCash=o.cash||0;
   setChip('paymethod',o.paymethod||'');setChip('paystatus',o.paystatus);setChip('ship',o.ship);
   $('#savebtn').textContent='更新訂單';$('#cancelbtn').style.display='block';
   tab('new');window.scrollTo({top:0,behavior:'smooth'});
-  drawProducts();drawMeter();
+  drawProducts();drawMeter();renderRedeemBox();
 }
 async function del(id){
   if(!confirm('刪掉這筆訂單？'))return;
@@ -713,7 +762,7 @@ function renderList(){
         <span class="tag ${o.paystatus==='已付清'?'g':o.paystatus==='已付訂金'?'w':''}">${o.paystatus}${owe>0&&o.deposit?`・尚欠 ${nt(owe)}`:''}</span>
         ${o.paymethod?`<span class="tag">${o.paymethod}</span>`:''}
         <span class="tag ${o.ship==='已交付'?'g':''}">${o.ship}</span>
-        ${o.cash?`<span class="tag r">回饋金 ${o.cash}</span>`:''}
+        ${o.cash?redeemTag(o):''}
         ${o.cooler?`<span class="tag r">冷袋</span>`:''}
         ${o.plus?`<span class="tag r">${GIFTS[o.plus].label}${[o.giftSerum,o.giftHydrosol].filter(Boolean).length?`：${[o.giftSerum,o.giftHydrosol].filter(Boolean).join('+')}`:'（未選定）'}</span>`:''}
       </div>
@@ -762,11 +811,12 @@ function renderBuy(){
     }).join('');
 
   renderGiftNeeds();
+  renderFullNeeds();
 
-  const fixedGrid=(catKey,names,label)=>`<div style="margin-bottom:18px"><label class="fl">${label}</label>`+
+  const fixedGrid=(catKey,names,label,priceMap)=>`<div style="margin-bottom:18px"><label class="fl">${label}</label>`+
     names.map(name=>`
     <div class="gm-row">
-      <input type="text" value="${name}" disabled style="opacity:.7">
+      <input type="text" value="${name}${priceMap?`　NT$${priceMap[name]}`:''}" disabled style="opacity:.7">
       <input type="number" min="0" value="${(giftMeta[catKey]&&giftMeta[catKey][name])||0}" onchange="updateFixedStock('${catKey}','${name}',this.value)">
     </div>`).join('')+`</div>`;
 
@@ -776,8 +826,8 @@ function renderBuy(){
     ['stock','其他庫存（不會再進貨，用完就沒了）','例：面膜'],
   ];
   $('#giftmeta').innerHTML=
-    fixedGrid('serumStock',SERUMS,'原液庫存（9 款，共用於 10,000／8,000／4,000 檔）')+
-    fixedGrid('hydrosolStock',HYDROSOLS,'純露庫存（5 款，只用於 10,000 檔）')+
+    fixedGrid('serumStock',SERUMS,'原液庫存（旅行 5ml，9 款，共用於 10,000／8,000／4,000 檔）')+
+    fixedGrid('hydrosolStock',HYDROSOLS,'純露庫存（旅行 5ml，5 款，只用於 10,000 檔）')+
     fields.map(([k,lb,ph])=>{
     const items=giftMeta[k]||[];
     return `<div style="margin-bottom:18px"><label class="fl">${lb}</label>`+
@@ -790,6 +840,45 @@ function renderBuy(){
       `<button class="btn ghost" style="margin-top:0" onclick="addGiftItem('${k}')">＋ 新增品項</button></div>`;
   }).join('')+
     `<div class="hint">原液／純露的名稱是固定的，填數量就好。「旅行養膚組固定加贈」跟「其他庫存」品項名稱要打一樣，才能對得起來、算出剩餘量。改了會自動更新上面的採購統計表。</div>`;
+
+  $('#fullstockmeta').innerHTML=
+    fixedGrid('serumStockFull',SERUMS,'原液正裝庫存（30ml，現貨售完為止）',SERUM_FULL_PRICE)+
+    fixedGrid('hydrosolStockFull',HYDROSOLS,'純露正裝庫存（100ml，現貨售完為止）',HYDROSOL_FULL_PRICE)+
+    `<div class="hint">這是客人拿回饋金換購的正裝現貨，跟上面的旅行組贈品是分開算的庫存。</div>`;
+}
+function fullStockQtyByName(name){
+  if(giftMeta.serumStockFull && name in giftMeta.serumStockFull) return Number(giftMeta.serumStockFull[name])||0;
+  if(giftMeta.hydrosolStockFull && name in giftMeta.hydrosolStockFull) return Number(giftMeta.hydrosolStockFull[name])||0;
+  return 0;
+}
+function fullPriceByName(name){
+  return SERUM_FULL_PRICE[name] ?? HYDROSOL_FULL_PRICE[name] ?? 0;
+}
+function redeemTag(o){
+  const items=o.redeemItems||{};
+  const names=Object.keys(items);
+  if(!names.length) return `<span class="tag r">回饋金 ${nt(o.cash)}・未兌換</span>`;
+  const total=names.reduce((s,n)=>s+(Number(items[n])||0)*fullPriceByName(n),0);
+  const owe=Math.max(0,total-o.cash);
+  const list=names.map(n=>`${n}×${items[n]}`).join('、');
+  return `<span class="tag g">已兌換：${list}${owe?`（補差價 ${nt(owe)}）`:''}</span>`;
+}
+function fullNeeds(){
+  const needs={};
+  orders.forEach(o=>{
+    Object.entries(o.redeemItems||{}).forEach(([name,qty])=>{
+      needs[name]=(needs[name]||0)+(Number(qty)||0);
+    });
+  });
+  return needs;
+}
+function renderFullNeeds(){
+  const needs=fullNeeds();
+  $('#fullneeds').innerHTML=`<tr><th>品項</th><th class="n">單價</th><th class="n">庫存</th><th class="n">已兌換</th><th class="n">剩餘</th></tr>`+
+    FULL_ITEMS.map(it=>{
+      const stock=fullStockQtyByName(it.name), need=needs[it.name]||0, left=stock-need;
+      return `<tr><td>${it.name}<div style="font-size:11px;color:var(--ink-38)">${it.spec}</div></td><td class="n">${nt(it.price)}</td><td class="n">${stock}</td><td class="n">${need}</td><td class="n" style="${left<0?'color:var(--warn);font-weight:700':''}">${left}</td></tr>`;
+    }).join('');
 }
 function stockQtyByName(name){
   if(giftMeta.serumStock && name in giftMeta.serumStock) return Number(giftMeta.serumStock[name])||0;
