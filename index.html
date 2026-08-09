@@ -783,8 +783,12 @@ function renderList(){
   $('#listbox').innerHTML=rows.map(o=>{
     const cls=o.paystatus==='已付清'?'paid':o.paystatus==='已付訂金'?'part':'';
     const owe=o.total-(o.deposit||0);
+    const redeemItemsList=Object.keys(o.redeemItems||{});
+    const redeemTotal=redeemItemsList.reduce((s,n)=>s+(Number(o.redeemItems[n])||0)*fullPriceByName(n),0);
+    const redeemOwe=redeemItemsList.length?Math.max(0,redeemTotal-(o.cash||0)):0;
     return `<div class="oc ${cls}">
       <div class="h"><span class="nm">${o.name}${o.contact?` <span style="font-size:12px;color:var(--ink-38)">${o.contact}</span>`:''}</span><span class="tt num">${nt(o.total)}</span></div>
+      ${redeemItemsList.length?`<div class="pprice num" style="text-align:right;margin-top:-4px">原液純露補差價 ${nt(redeemOwe)}</div>`:''}
       <div class="items">${itemText(o)}</div>
       <div class="tags">
         <span class="tag ${o.paystatus==='已付清'?'g':o.paystatus==='已付訂金'?'w':''}">${o.paystatus}${owe>0&&o.deposit?`・尚欠 ${nt(owe)}`:''}</span>
