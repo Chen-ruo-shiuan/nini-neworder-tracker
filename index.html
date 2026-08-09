@@ -52,6 +52,10 @@ section.on{display:block}
 .eyebrow{font-family:var(--serif);font-size:12px;font-weight:600;letter-spacing:.16em;color:var(--rose-dp);margin:22px 0 9px;display:flex;align-items:center;gap:9px}
 .eyebrow::after{content:"";flex:1;height:1px;background:var(--ink-14)}
 .eyebrow:first-child{margin-top:0}
+summary.eyebrow{cursor:pointer;list-style:none}
+summary.eyebrow::-webkit-details-marker{display:none}
+summary.eyebrow::before{content:"▸";font-size:10px;color:var(--rose-dp)}
+details[open] summary.eyebrow::before{content:"▾"}
 label.fl{display:block;font-size:12px;letter-spacing:.06em;color:var(--ink-60);margin-bottom:5px}
 input[type=text],input[type=number],textarea,select{width:100%;font-family:var(--sans);font-size:16px;color:var(--ink);background:#fff;border:1px solid var(--ink-14);border-radius:3px;padding:10px 11px}
 textarea{min-height:62px;resize:vertical;font-size:15px}
@@ -210,13 +214,13 @@ body.unlocked #lockscreen{display:none}
   <div class="card" id="giftpickbox" style="display:none">
     <div id="gp-serum-wrap">
       <label class="fl">原液——這筆訂單要給哪一款？</label>
-      <select id="f-giftserum"></select>
+      <div class="chips" id="gp-serum-chips"></div>
     </div>
     <div id="gp-hydrosol-wrap" style="margin-top:14px">
       <label class="fl">純露——這筆訂單要給哪一款？</label>
-      <select id="f-gifthydrosol"></select>
+      <div class="chips" id="gp-hydrosol-chips"></div>
     </div>
-    <div class="hint">選項來自「叫貨」分頁的原液／純露庫存，選了會自動扣庫存。</div>
+    <div class="hint">點選要送的品項，會自動對照「叫貨」分頁的庫存算剩餘量。</div>
   </div>
 
   <div class="eyebrow">付款</div>
@@ -271,8 +275,10 @@ body.unlocked #lockscreen{display:none}
   <div class="card"><table id="gifttable"></table></div>
   <div class="eyebrow">贈品內容物採購統計</div>
   <div class="card"><table id="giftneeds"></table></div>
-  <div class="eyebrow">贈品內容物設定</div>
-  <div class="card" id="giftmeta"></div>
+  <details id="giftmeta-details">
+    <summary class="eyebrow">贈品內容物設定</summary>
+    <div class="card" id="giftmeta"></div>
+  </details>
   <button class="btn ghost" onclick="exportCSV()">匯出 CSV（給廠商或對帳用）</button>
 </section>
 
@@ -339,6 +345,7 @@ const HYDROSOLS=['洋甘菊','千葉玫瑰','桂花','橙花','葡萄柚'];
 let orders=[], cart={}, editId=null;
 let giftMeta={plus10k:[],cooler:[],stock:[],serumStock:{},hydrosolStock:{}};
 let sel={paymethod:'',paystatus:'未付款',ship:'待叫貨'};
+let giftPickState={giftSerum:'',giftHydrosol:''};
 
 function parseGiftItems(v){
   if(Array.isArray(v)) return v;
@@ -549,15 +556,16 @@ function pickRemaining(name,excludeOrderId,field){
   }
   return stock-need;
 }
-function fillPickSelect(selId,names,field){
-  const sel=$(selId);
-  const existing=editId?(orders.find(o=>o.id===editId)||{})[field]:'';
-  const current=sel.value||existing||'';
-  sel.innerHTML='<option value="">尚未選定</option>'+names.map(name=>{
+function buildGiftChips(containerSel,names,field){
+  $(containerSel).innerHTML=names.map(name=>{
     const left=pickRemaining(name,editId,field);
-    return `<option value="${name}">${name}（剩 ${left}）</option>`;
+    const active=giftPickState[field]===name;
+    return `<button type="button" class="chip" data-v="${name}" aria-pressed="${active}" onclick="pickGiftChip('${field}','${name}')">${name}（剩 ${left}）</button>`;
   }).join('');
-  sel.value=current;
+}
+function pickGiftChip(field,name){
+  giftPickState[field]=(giftPickState[field]===name)?'':name;
+  drawMeter();
 }
 function renderGiftPickSelect(T){
   const box=$('#giftpickbox');
@@ -566,8 +574,8 @@ function renderGiftPickSelect(T){
   if(!isPlus10k&&!isRandom){ box.style.display='none'; return; }
   box.style.display='block';
   $('#gp-hydrosol-wrap').style.display=isPlus10k?'block':'none';
-  fillPickSelect('#f-giftserum',SERUMS,'giftSerum');
-  if(isPlus10k) fillPickSelect('#f-gifthydrosol',HYDROSOLS,'giftHydrosol');
+  buildGiftChips('#gp-serum-chips',SERUMS,'giftSerum');
+  if(isPlus10k) buildGiftChips('#gp-hydrosol-chips',HYDROSOLS,'giftHydrosol');
 }
 function giftPickTally(tierKey){
   const serumCounts={}, hydrosolCounts={};
@@ -602,8 +610,8 @@ async function save(){
     items:{...cart}, total:t,
     cash:T.cash, cooler:t>=5000,
     plus,
-    giftSerum:(plus==='plus10k'||plus==='plus8k'||plus==='plus4k')?($('#f-giftserum').value||''):'',
-    giftHydrosol:plus==='plus10k'?($('#f-gifthydrosol').value||''):'',
+    giftSerum:(plus==='plus10k'||plus==='plus8k'||plus==='plus4k')?(giftPickState.giftSerum||''):'',
+    giftHydrosol:plus==='plus10k'?(giftPickState.giftHydrosol||''):'',
     paymethod:sel.paymethod, paystatus:sel.paystatus,
     deposit:sel.paystatus==='已付訂金'?Number($('#f-dep').value||0):(sel.paystatus==='已付清'?t:0),
     ship:sel.ship, note:$('#f-note').value.trim(),
@@ -618,7 +626,7 @@ async function save(){
 function resetForm(){
   cart={};editId=null;
   $('#f-name').value='';$('#f-contact').value='';$('#f-note').value='';$('#f-dep').value='';
-  $('#f-giftserum').value='';$('#f-gifthydrosol').value='';
+  giftPickState={giftSerum:'',giftHydrosol:''};
   setChip('paymethod','');setChip('paystatus','未付款');setChip('ship','待叫貨');
   $('#savebtn').textContent='儲存訂單';$('#cancelbtn').style.display='none';
   drawProducts();drawMeter();
@@ -627,7 +635,8 @@ function edit(id){
   const o=orders.find(x=>x.id===id);if(!o)return;
   editId=id;cart={...o.items};
   $('#f-name').value=o.name;$('#f-contact').value=o.contact||'';$('#f-note').value=o.note||'';
-  $('#f-dep').value=o.deposit||'';$('#f-giftserum').value='';$('#f-gifthydrosol').value='';
+  $('#f-dep').value=o.deposit||'';
+  giftPickState={giftSerum:o.giftSerum||'',giftHydrosol:o.giftHydrosol||''};
   setChip('paymethod',o.paymethod||'');setChip('paystatus',o.paystatus);setChip('ship',o.ship);
   $('#savebtn').textContent='更新訂單';$('#cancelbtn').style.display='block';
   tab('new');window.scrollTo({top:0,behavior:'smooth'});
