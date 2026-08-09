@@ -135,6 +135,11 @@ tr.tot td{border-bottom:0;border-top:1.5px solid var(--ink);font-weight:700;font
 .qbar .track i.low{background:var(--warn)}
 .qbar .v{width:52px;text-align:right;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
 
+.gm-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.gm-row input[type=text]{flex:1}
+.gm-row input[type=number]{width:66px;flex:none;padding:10px 6px;text-align:center}
+.gm-row button{width:36px;height:38px;flex:none;border:1px solid var(--ink-14);background:#fff;border-radius:3px;cursor:pointer;color:var(--ink-60);font-size:16px}
+
 .empty{text-align:center;padding:44px 20px;color:var(--ink-38);font-size:14px}
 .empty b{display:block;font-family:var(--serif);font-size:15px;color:var(--ink-60);margin-bottom:6px}
 #toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);background:var(--ink);color:var(--paper);padding:11px 20px;border-radius:3px;font-size:13.5px;opacity:0;pointer-events:none;transition:.25s;z-index:99}
@@ -202,6 +207,18 @@ body.unlocked #lockscreen{display:none}
     <div class="gifts" id="m-gifts"></div>
   </div>
 
+  <div class="card" id="giftpickbox" style="display:none">
+    <div id="gp-serum-wrap">
+      <label class="fl">原液——這筆訂單要給哪一款？</label>
+      <select id="f-giftserum"></select>
+    </div>
+    <div id="gp-hydrosol-wrap" style="margin-top:14px">
+      <label class="fl">純露——這筆訂單要給哪一款？</label>
+      <select id="f-gifthydrosol"></select>
+    </div>
+    <div class="hint">選項來自「叫貨」分頁的原液／純露庫存，選了會自動扣庫存。</div>
+  </div>
+
   <div class="eyebrow">付款</div>
   <div class="card">
     <label class="fl">方式</label>
@@ -252,7 +269,9 @@ body.unlocked #lockscreen{display:none}
   <div class="card"><table id="buytable"></table></div>
   <div class="eyebrow">贈品需準備</div>
   <div class="card"><table id="gifttable"></table></div>
-  <div class="eyebrow">贈品內容物</div>
+  <div class="eyebrow">贈品內容物採購統計</div>
+  <div class="card"><table id="giftneeds"></table></div>
+  <div class="eyebrow">贈品內容物設定</div>
   <div class="card" id="giftmeta"></div>
   <button class="btn ghost" onclick="exportCSV()">匯出 CSV（給廠商或對帳用）</button>
 </section>
@@ -314,10 +333,28 @@ const GIFTS={
  plus8k:{label:'98折禮券 + 原液旅行（隨機）',quota:10},
  plus4k:{label:'原液旅行（隨機）',quota:10},
 };
+const SERUMS=['EGF','神經醯胺','積雪草','藍銅胜肽','穀胱甘肽','兒茶素','維他命C','B3','B5'];
+const HYDROSOLS=['洋甘菊','千葉玫瑰','桂花','橙花','葡萄柚'];
 
 let orders=[], cart={}, editId=null;
-let giftMeta={plus10k:'',plus8k:'',plus4k:'',cooler:''};
+let giftMeta={plus10k:[],cooler:[],stock:[],serumStock:{},hydrosolStock:{}};
 let sel={paymethod:'',paystatus:'未付款',ship:'待叫貨'};
+
+function parseGiftItems(v){
+  if(Array.isArray(v)) return v;
+  if(!v) return [];
+  try{ const p=JSON.parse(v); return Array.isArray(p)?p:[]; }
+  catch(e){ return [{name:String(v), qty:1}]; }
+}
+function parseGiftMap(v){
+  if(v&&typeof v==='object'&&!Array.isArray(v)) return v;
+  if(!v) return {};
+  try{ const p=JSON.parse(v); return (p&&typeof p==='object'&&!Array.isArray(p))?p:{}; }
+  catch(e){ return {}; }
+}
+function giftItemsText(items){
+  return (items||[]).filter(i=>i&&i.name).map(i=>`${i.name}×${i.qty||1}`).join('、');
+}
 
 const $=s=>document.querySelector(s);
 const nt=n=>'NT$'+Number(n||0).toLocaleString('en-US');
@@ -355,7 +392,7 @@ function qs(params){
   return Object.keys(params).map(k=>`${k}=${encodeURIComponent(params[k]==null?'':params[k])}`).join('&');
 }
 async function apiGet(params){
-  const r=await fetch(`${SHEETS_URL}?${qs({...params, key:PAGE_PASSWORD})}`);
+  const r=await fetch(`${SHEETS_URL}?${qs({...params, pw:PAGE_PASSWORD})}`);
   const j=await r.json();
   if(!j.ok) throw new Error(j.error||'api error');
   return j;
@@ -364,11 +401,12 @@ const apiListOrders=async()=> (await apiGet({action:'list'})).orders;
 const apiListGift=async()=> (await apiGet({action:'listgift'})).gift;
 const apiUpsert=o=>apiGet({action:'upsert', id:o.id, name:o.name, contact:o.contact,
   items:JSON.stringify(o.items), total:o.total, cash:o.cash, cooler:String(!!o.cooler),
-  plus:o.plus||'', paymethod:o.paymethod||'', paystatus:o.paystatus, deposit:o.deposit,
+  plus:o.plus||'', giftSerum:o.giftSerum||'', giftHydrosol:o.giftHydrosol||'',
+  paymethod:o.paymethod||'', paystatus:o.paystatus, deposit:o.deposit,
   ship:o.ship, note:o.note, date:o.date});
 const apiDelete=id=>apiGet({action:'delete', id});
 const apiWipeAll=()=>apiGet({action:'wipe'});
-const apiSaveGift=(key,value)=>apiGet({action:'savegift', key, value});
+const apiSaveGift=(key,value)=>apiGet({action:'savegift', k:key, value});
 
 /* ---------- storage ---------- */
 function loadCache(){
@@ -398,7 +436,10 @@ async function syncFromCloud(){
   try{
     const [os,g]=await Promise.all([apiListOrders(), apiListGift()]);
     orders=os.sort((a,b)=>new Date(b.date)-new Date(a.date));
-    giftMeta={...giftMeta,...g};
+    Object.keys(g).forEach(k=>{
+      if(k==='serumStock'||k==='hydrosolStock') giftMeta[k]={...giftMeta[k],...parseGiftMap(g[k])};
+      else giftMeta[k]=parseGiftItems(g[k]);
+    });
     saveCache(); saveGiftCache();
     renderAll();
     t.textContent='已同步　'+new Date().toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'});
@@ -407,11 +448,31 @@ async function syncFromCloud(){
     t.classList.add('bad');
   }
 }
-async function editGift(k,v){
-  giftMeta[k]=v; saveGiftCache();
+async function syncGiftTier(k){
+  saveGiftCache();
   renderBuy(); drawMeter();
-  try{ await apiSaveGift(k,v); toast('贈品內容已存'); }
+  try{ await apiSaveGift(k, JSON.stringify(giftMeta[k]||[])); }
   catch(e){ toast('雲端同步失敗，請檢查網路'); }
+}
+function addGiftItem(k){
+  giftMeta[k]=giftMeta[k]||[];
+  giftMeta[k].push({name:'',qty:1});
+  renderBuy();
+}
+function updateGiftItem(k,idx,field,value){
+  if(!giftMeta[k]||!giftMeta[k][idx])return;
+  giftMeta[k][idx][field]= field==='qty' ? Math.max(1,Number(value)||1) : value;
+  syncGiftTier(k);
+}
+function removeGiftItem(k,idx){
+  if(!giftMeta[k])return;
+  giftMeta[k].splice(idx,1);
+  syncGiftTier(k);
+}
+function updateFixedStock(catKey,name,value){
+  giftMeta[catKey]=giftMeta[catKey]||{};
+  giftMeta[catKey][name]=Math.max(0,Number(value)||0);
+  syncGiftTier(catKey);
 }
 
 /* ---------- form ---------- */
@@ -459,12 +520,15 @@ function drawMeter(){
 
   const g=[];
   if(T.cash)g.push(`回饋金 ${T.cash}`);
-  if(t>=5000)g.push('杜邦保溫冷袋'+(giftMeta.cooler?`（${giftMeta.cooler}）`:''));
+  if(t>=5000){const ct=giftItemsText(giftMeta.cooler);g.push('杜邦保溫冷袋'+(ct?`（${ct}）`:''));}
   if(T.plus&&plusOpen()){
     const left=GIFTS[T.plus].quota-used(T.plus);
-    g.push(`加一回饋：${GIFTS[T.plus].label}${giftMeta[T.plus]?`（${giftMeta[T.plus]}）`:''}${left<=3?`　剩 ${left} 份`:''}`);
+    const pt=T.plus==='plus10k'?giftItemsText(giftMeta[T.plus]):'';
+    g.push(`加一回饋：${GIFTS[T.plus].label}${pt?`（${pt}）`:''}${left<=3?`　剩 ${left} 份`:''}`);
   }
   $('#m-gifts').textContent=g.length?'贈品：'+g.join('　/　'):'尚未達到任何贈品門檻';
+
+  renderGiftPickSelect(T);
 
   const lp=$('#chip-linepay');
   if(t<8000){
@@ -475,6 +539,43 @@ function drawMeter(){
     lp.disabled=false;
     $('#payhint').className='hint'; $('#payhint').textContent='可用 LINE Pay。無分期。';
   }
+}
+function pickRemaining(name,excludeOrderId,field){
+  const stock=stockQtyByName(name);
+  let need=giftNeeds()[name]||0;
+  if(excludeOrderId){
+    const o=orders.find(x=>x.id===excludeOrderId);
+    if(o&&o[field]===name) need-=1;
+  }
+  return stock-need;
+}
+function fillPickSelect(selId,names,field){
+  const sel=$(selId);
+  const existing=editId?(orders.find(o=>o.id===editId)||{})[field]:'';
+  const current=sel.value||existing||'';
+  sel.innerHTML='<option value="">尚未選定</option>'+names.map(name=>{
+    const left=pickRemaining(name,editId,field);
+    return `<option value="${name}">${name}（剩 ${left}）</option>`;
+  }).join('');
+  sel.value=current;
+}
+function renderGiftPickSelect(T){
+  const box=$('#giftpickbox');
+  const isPlus10k=plusOpen()&&T.plus==='plus10k';
+  const isRandom=plusOpen()&&(T.plus==='plus8k'||T.plus==='plus4k');
+  if(!isPlus10k&&!isRandom){ box.style.display='none'; return; }
+  box.style.display='block';
+  $('#gp-hydrosol-wrap').style.display=isPlus10k?'block':'none';
+  fillPickSelect('#f-giftserum',SERUMS,'giftSerum');
+  if(isPlus10k) fillPickSelect('#f-gifthydrosol',HYDROSOLS,'giftHydrosol');
+}
+function giftPickTally(tierKey){
+  const serumCounts={}, hydrosolCounts={};
+  orders.filter(o=>o.plus===tierKey).forEach(o=>{
+    if(o.giftSerum)serumCounts[o.giftSerum]=(serumCounts[o.giftSerum]||0)+1;
+    if(o.giftHydrosol)hydrosolCounts[o.giftHydrosol]=(hydrosolCounts[o.giftHydrosol]||0)+1;
+  });
+  return {serumCounts,hydrosolCounts};
 }
 function pick(el,group){
   document.querySelectorAll(`#${group} .chip`).forEach(c=>c.setAttribute('aria-pressed','false'));
@@ -494,12 +595,15 @@ async function save(){
   const t=subtotal();
   if(!t){toast('還沒選任何品項');return;}
   const T=tier(t);
+  const plus=(T.plus&&plusOpen())?T.plus:null;
   const o={
     id:editId||('o'+Date.now()),
     name, contact:$('#f-contact').value.trim(),
     items:{...cart}, total:t,
     cash:T.cash, cooler:t>=5000,
-    plus:(T.plus&&plusOpen())?T.plus:null,
+    plus,
+    giftSerum:(plus==='plus10k'||plus==='plus8k'||plus==='plus4k')?($('#f-giftserum').value||''):'',
+    giftHydrosol:plus==='plus10k'?($('#f-gifthydrosol').value||''):'',
     paymethod:sel.paymethod, paystatus:sel.paystatus,
     deposit:sel.paystatus==='已付訂金'?Number($('#f-dep').value||0):(sel.paystatus==='已付清'?t:0),
     ship:sel.ship, note:$('#f-note').value.trim(),
@@ -514,6 +618,7 @@ async function save(){
 function resetForm(){
   cart={};editId=null;
   $('#f-name').value='';$('#f-contact').value='';$('#f-note').value='';$('#f-dep').value='';
+  $('#f-giftserum').value='';$('#f-gifthydrosol').value='';
   setChip('paymethod','');setChip('paystatus','未付款');setChip('ship','待叫貨');
   $('#savebtn').textContent='儲存訂單';$('#cancelbtn').style.display='none';
   drawProducts();drawMeter();
@@ -522,7 +627,7 @@ function edit(id){
   const o=orders.find(x=>x.id===id);if(!o)return;
   editId=id;cart={...o.items};
   $('#f-name').value=o.name;$('#f-contact').value=o.contact||'';$('#f-note').value=o.note||'';
-  $('#f-dep').value=o.deposit||'';
+  $('#f-dep').value=o.deposit||'';$('#f-giftserum').value='';$('#f-gifthydrosol').value='';
   setChip('paymethod',o.paymethod||'');setChip('paystatus',o.paystatus);setChip('ship',o.ship);
   $('#savebtn').textContent='更新訂單';$('#cancelbtn').style.display='block';
   tab('new');window.scrollTo({top:0,behavior:'smooth'});
@@ -580,7 +685,7 @@ function renderList(){
         <span class="tag ${o.ship==='已交付'?'g':''}">${o.ship}</span>
         ${o.cash?`<span class="tag r">回饋金 ${o.cash}</span>`:''}
         ${o.cooler?`<span class="tag r">冷袋</span>`:''}
-        ${o.plus?`<span class="tag r">${GIFTS[o.plus].label}</span>`:''}
+        ${o.plus?`<span class="tag r">${GIFTS[o.plus].label}${[o.giftSerum,o.giftHydrosol].filter(Boolean).length?`：${[o.giftSerum,o.giftHydrosol].filter(Boolean).join('+')}`:'（未選定）'}</span>`:''}
       </div>
       ${o.note?`<div class="items" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--ink-07)">${o.note}</div>`:''}
       <div class="acts">
@@ -605,21 +710,93 @@ function renderBuy(){
     `<tr class="tot"><td>合計瓶數</td><td class="n">${live.reduce((s,o)=>s+Object.values(o.items).reduce((a,b)=>a+b,0),0)}</td><td class="n">${tot}</td></tr>`;
 
   const cool=orders.filter(o=>o.cooler).length;
+  const pickDetail=k=>{
+    const {serumCounts,hydrosolCounts}=giftPickTally(k);
+    const parts=Object.entries(serumCounts).map(([n,c])=>`${n}×${c}`);
+    Object.entries(hydrosolCounts).forEach(([n,c])=>parts.push(`${n}(純露)×${c}`));
+    const unpickedSerum=orders.filter(o=>o.plus===k && !o.giftSerum).length;
+    if(unpickedSerum)parts.push(`原液尚未選定×${unpickedSerum}`);
+    if(k==='plus10k'){
+      const unpickedH=orders.filter(o=>o.plus===k && !o.giftHydrosol).length;
+      if(unpickedH)parts.push(`純露尚未選定×${unpickedH}`);
+      const fixed=giftItemsText(giftMeta.plus10k);
+      if(fixed)parts.push(fixed);
+    }
+    return parts.join('、');
+  };
   $('#gifttable').innerHTML=`<tr><th>贈品</th><th class="n">需準備</th></tr>`+
-    `<tr><td>杜邦保溫冷袋${giftMeta.cooler?`<div style="font-size:11px;color:var(--ink-38)">${giftMeta.cooler}</div>`:''}</td><td class="n">${cool||'—'}</td></tr>`+
-    Object.keys(GIFTS).map(k=>`<tr><td>${GIFTS[k].label}${giftMeta[k]?`<div style="font-size:11px;color:var(--ink-38)">${giftMeta[k]}</div>`:''}</td><td class="n">${used(k)||'—'}</td></tr>`).join('');
+    `<tr><td>杜邦保溫冷袋${giftItemsText(giftMeta.cooler)?`<div style="font-size:11px;color:var(--ink-38)">${giftItemsText(giftMeta.cooler)}</div>`:''}</td><td class="n">${cool||'—'}</td></tr>`+
+    Object.keys(GIFTS).map(k=>{
+      const detail=pickDetail(k);
+      return `<tr><td>${GIFTS[k].label}${detail?`<div style="font-size:11px;color:var(--ink-38)">${detail}</div>`:''}</td><td class="n">${used(k)||'—'}</td></tr>`;
+    }).join('');
+
+  renderGiftNeeds();
+
+  const fixedGrid=(catKey,names,label)=>`<div style="margin-bottom:18px"><label class="fl">${label}</label>`+
+    names.map(name=>`
+    <div class="gm-row">
+      <input type="text" value="${name}" disabled style="opacity:.7">
+      <input type="number" min="0" value="${(giftMeta[catKey]&&giftMeta[catKey][name])||0}" onchange="updateFixedStock('${catKey}','${name}',this.value)">
+    </div>`).join('')+`</div>`;
 
   const fields=[
-    ['plus10k','旅行養膚組（10,000 檔）','例：千葉玫瑰純露 10ml ×1、積雪草原液 5ml ×1'],
-    ['plus8k','原液旅行・98折檔（8,000 檔）','例：原液 5ml 隨機 ×1'],
-    ['plus4k','原液旅行（4,000 檔）','例：原液 5ml 隨機 ×1'],
+    ['plus10k','旅行養膚組（10,000 檔）固定加贈（例如面膜）','例：面膜'],
     ['cooler','杜邦保溫冷袋（滿 5,000）','例：中號保冷袋'],
+    ['stock','其他庫存（不會再進貨，用完就沒了）','例：面膜'],
   ];
-  $('#giftmeta').innerHTML=fields.map(([k,lb,ph])=>
-    `<div style="margin-bottom:13px"><label class="fl">${lb}</label>
-     <input type="text" value="${(giftMeta[k]||'').replace(/"/g,'&quot;')}" placeholder="${ph}"
-      onchange="editGift('${k}',this.value)"></div>`).join('')+
-    `<div class="hint">填一次就會記住。內容改了直接改這裡，出貨清單和登記畫面會一起更新。</div>`;
+  $('#giftmeta').innerHTML=
+    fixedGrid('serumStock',SERUMS,'原液庫存（9 款，共用於 10,000／8,000／4,000 檔）')+
+    fixedGrid('hydrosolStock',HYDROSOLS,'純露庫存（5 款，只用於 10,000 檔）')+
+    fields.map(([k,lb,ph])=>{
+    const items=giftMeta[k]||[];
+    return `<div style="margin-bottom:18px"><label class="fl">${lb}</label>`+
+      (items.length?items.map((it,idx)=>`
+      <div class="gm-row">
+        <input type="text" value="${(it.name||'').replace(/"/g,'&quot;')}" placeholder="${ph}" onchange="updateGiftItem('${k}',${idx},'name',this.value)">
+        <input type="number" min="1" value="${it.qty||1}" onchange="updateGiftItem('${k}',${idx},'qty',this.value)">
+        <button onclick="removeGiftItem('${k}',${idx})" aria-label="刪除">×</button>
+      </div>`).join(''):'')+
+      `<button class="btn ghost" style="margin-top:0" onclick="addGiftItem('${k}')">＋ 新增品項</button></div>`;
+  }).join('')+
+    `<div class="hint">原液／純露的名稱是固定的，填數量就好。「旅行養膚組固定加贈」跟「其他庫存」品項名稱要打一樣，才能對得起來、算出剩餘量。改了會自動更新上面的採購統計表。</div>`;
+}
+function stockQtyByName(name){
+  if(giftMeta.serumStock && name in giftMeta.serumStock) return Number(giftMeta.serumStock[name])||0;
+  if(giftMeta.hydrosolStock && name in giftMeta.hydrosolStock) return Number(giftMeta.hydrosolStock[name])||0;
+  const row=(giftMeta.stock||[]).find(i=>i.name===name);
+  return row?Number(row.qty)||0:0;
+}
+function giftNeeds(){
+  const needs={};
+  const cnt10k=used('plus10k');
+  if(cnt10k)(giftMeta.plus10k||[]).forEach(it=>{
+    if(!it.name)return;
+    needs[it.name]=(needs[it.name]||0)+(Number(it.qty)||0)*cnt10k;
+  });
+  const coolCount=orders.filter(o=>o.cooler).length;
+  (giftMeta.cooler||[]).forEach(it=>{
+    if(!it.name)return;
+    needs[it.name]=(needs[it.name]||0)+(Number(it.qty)||0)*coolCount;
+  });
+  orders.forEach(o=>{
+    if((o.plus==='plus10k'||o.plus==='plus8k'||o.plus==='plus4k')&&o.giftSerum){
+      needs[o.giftSerum]=(needs[o.giftSerum]||0)+1;
+    }
+    if(o.plus==='plus10k'&&o.giftHydrosol){
+      needs[o.giftHydrosol]=(needs[o.giftHydrosol]||0)+1;
+    }
+  });
+  return needs;
+}
+function renderGiftNeeds(){
+  const needs=giftNeeds();
+  const names=[...new Set([...SERUMS, ...HYDROSOLS, ...Object.keys(needs), ...(giftMeta.stock||[]).map(i=>i.name).filter(Boolean)])];
+  $('#giftneeds').innerHTML=`<tr><th>品項</th><th class="n">庫存</th><th class="n">需求</th><th class="n">剩餘</th></tr>`+
+    (names.length?names.map(name=>{
+      const stock=stockQtyByName(name), need=needs[name]||0, left=stock-need;
+      return `<tr><td>${name}</td><td class="n">${stock}</td><td class="n">${need}</td><td class="n" style="${left<0?'color:var(--warn);font-weight:700':''}">${left}</td></tr>`;
+    }).join(''):`<tr><td colspan="4" style="color:var(--ink-38);text-align:center;padding:16px 4px">下面先設定庫存與各檔次贈品內容</td></tr>`);
 }
 function renderSum(){
   const t=orders.reduce((s,o)=>s+o.total,0);
@@ -646,10 +823,10 @@ function renderSum(){
 function renderAll(){drawProducts();drawMeter();renderList();renderBuy();renderSum();}
 
 function exportCSV(){
-  const head=['日期','姓名','聯絡','金額','付款方式','付款狀態','已收','出貨','回饋金','冷袋','加一回饋','備註',...P.map(p=>p.name)];
+  const head=['日期','姓名','聯絡','金額','付款方式','付款狀態','已收','出貨','回饋金','冷袋','加一回饋','贈送原液','贈送純露','備註',...P.map(p=>p.name)];
   const rows=orders.map(o=>[
     new Date(o.date).toLocaleDateString('zh-TW'),o.name,o.contact||'',o.total,o.paymethod||'',o.paystatus,o.deposit||0,o.ship,
-    o.cash||0,o.cooler?'是':'',o.plus?GIFTS[o.plus].label:'',(o.note||'').replace(/[\n,]/g,' '),
+    o.cash||0,o.cooler?'是':'',o.plus?GIFTS[o.plus].label:'',o.giftSerum||'',o.giftHydrosol||'',(o.note||'').replace(/[\n,]/g,' '),
     ...P.map(p=>o.items[p.id]||0)
   ]);
   const csv='﻿'+[head,...rows].map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
