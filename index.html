@@ -211,6 +211,13 @@ body.unlocked #lockscreen{display:none}
     <div class="gifts" id="m-gifts"></div>
   </div>
 
+  <div class="card" id="plusbox" style="display:none">
+    <div class="chips">
+      <button type="button" class="chip" id="chip-plusenable" aria-pressed="false" onclick="togglePlusEnabled()">加一回饋：<span id="chip-plusenable-label"></span></button>
+    </div>
+    <div class="hint" id="plusbox-hint"></div>
+  </div>
+
   <div class="card" id="giftpickbox" style="display:none">
     <div id="gp-serum-wrap">
       <label class="fl">原液——這筆訂單要給哪一款？</label>
@@ -378,6 +385,7 @@ let giftPickState={giftSerum:'',giftHydrosol:''};
 let checkedFixedItems=new Set();
 let redeemCart={};
 let editingCash=0;
+let plusEnabled=false;
 
 function parseGiftItems(v){
   if(Array.isArray(v)) return v;
@@ -561,13 +569,14 @@ function drawMeter(){
   const g=[];
   if(T.cash)g.push(`回饋金 ${T.cash}`);
   if(t>=5000){const ct=giftItemsText(giftMeta.cooler);g.push('杜邦保溫冷袋'+(ct?`（${ct}）`:''));}
-  if(T.plus&&plusOpen()){
+  if(T.plus&&plusEnabled){
     const left=GIFTS[T.plus].quota-used(T.plus);
     const pt=T.plus==='plus10k'?giftItemsText(giftMeta[T.plus]):'';
     g.push(`加一回饋：${GIFTS[T.plus].label}${pt?`（${pt}）`:''}${left<=3?`　剩 ${left} 份`:''}`);
   }
   $('#m-gifts').textContent=g.length?'贈品：'+g.join('　/　'):'尚未達到任何贈品門檻';
 
+  renderPlusBox(T);
   renderGiftPickSelect(T);
   renderRedeemBox();
 
@@ -659,10 +668,25 @@ function renderRedeemBox(){
     $('#pay-grandtotal').style.display='none';
   }
 }
+function togglePlusEnabled(){
+  plusEnabled=!plusEnabled;
+  drawMeter();
+}
+function renderPlusBox(T){
+  const box=$('#plusbox');
+  if(!T.plus){ box.style.display='none'; return; }
+  box.style.display='block';
+  const chip=$('#chip-plusenable');
+  chip.setAttribute('aria-pressed',String(plusEnabled));
+  $('#chip-plusenable-label').textContent=GIFTS[T.plus].label;
+  $('#plusbox-hint').textContent=plusOpen()
+    ? '8/10 前的訂單，預設會給加一回饋，點按鈕可以取消。'
+    : '已過 8/10 活動時間，預設不會給加一回饋——如果要手動給這位客人，點一下按鈕開啟。';
+}
 function renderGiftPickSelect(T){
   const box=$('#giftpickbox');
-  const isPlus10k=plusOpen()&&T.plus==='plus10k';
-  const isRandom=plusOpen()&&(T.plus==='plus8k'||T.plus==='plus4k');
+  const isPlus10k=plusEnabled&&T.plus==='plus10k';
+  const isRandom=plusEnabled&&(T.plus==='plus8k'||T.plus==='plus4k');
   if(!isPlus10k&&!isRandom){ box.style.display='none'; return; }
   box.style.display='block';
   $('#gp-hydrosol-wrap').style.display=isPlus10k?'block':'none';
@@ -696,7 +720,7 @@ async function save(){
   const t=subtotal();
   if(!t){toast('還沒選任何品項');return;}
   const T=tier(t);
-  const plus=(T.plus&&plusOpen())?T.plus:null;
+  const plus=(T.plus&&plusEnabled)?T.plus:null;
   const o={
     id:editId||('o'+Date.now()),
     name, contact:$('#f-contact').value.trim(),
@@ -723,6 +747,7 @@ function resetForm(){
   giftPickState={giftSerum:'',giftHydrosol:''};
   checkedFixedItems=new Set();
   redeemCart={};editingCash=0;
+  plusEnabled=plusOpen();
   setChip('paymethod','');setChip('paystatus','未付款');setChip('ship','待叫貨');
   $('#savebtn').textContent='儲存訂單';$('#cancelbtn').style.display='none';
   drawProducts();drawMeter();renderRedeemBox();
@@ -735,6 +760,7 @@ function edit(id){
   giftPickState={giftSerum:o.giftSerum||'',giftHydrosol:o.giftHydrosol||''};
   checkedFixedItems=new Set();
   redeemCart={...(o.redeemItems||{})};editingCash=o.cash||0;
+  plusEnabled=!!o.plus;
   setChip('paymethod',o.paymethod||'');setChip('paystatus',o.paystatus);setChip('ship',o.ship);
   $('#savebtn').textContent='更新訂單';$('#cancelbtn').style.display='block';
   tab('new');window.scrollTo({top:0,behavior:'smooth'});
