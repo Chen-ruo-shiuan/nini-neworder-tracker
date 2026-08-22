@@ -379,7 +379,7 @@ const HYDROSOL_FULL_PRICE={'洋甘菊':550,'千葉玫瑰':550,'桂花':550,'橙�
 const FULL_ITEMS=[...SERUMS.map(n=>({name:n,price:SERUM_FULL_PRICE[n],cat:'serum',spec:'原液 30ml'})), ...HYDROSOLS.map(n=>({name:n,price:HYDROSOL_FULL_PRICE[n],cat:'hydrosol',spec:'純露 100ml'}))];
 
 let orders=[], cart={}, editId=null;
-let giftMeta={plus10k:[],cooler:[],stock:[],serumStock:{},hydrosolStock:{},serumStockFull:{},hydrosolStockFull:{}};
+let giftMeta={plus10k:[],cooler:[],stock:[],serumStock:{},hydrosolStock:{},serumStockFull:{},hydrosolStockFull:{},orderedQty:{}};
 let sel={paymethod:'',paystatus:'未付款',ship:'待叫貨'};
 let giftPickState={giftSerum:'',giftHydrosol:''};
 let checkedFixedItems=new Set();
@@ -485,7 +485,7 @@ async function syncFromCloud(){
     const [os,g]=await Promise.all([apiListOrders(), apiListGift()]);
     orders=os.sort((a,b)=>new Date(b.date)-new Date(a.date));
     Object.keys(g).forEach(k=>{
-      if(k==='serumStock'||k==='hydrosolStock'||k==='serumStockFull'||k==='hydrosolStockFull') giftMeta[k]={...giftMeta[k],...parseGiftMap(g[k])};
+      if(k==='serumStock'||k==='hydrosolStock'||k==='serumStockFull'||k==='hydrosolStockFull'||k==='orderedQty') giftMeta[k]={...giftMeta[k],...parseGiftMap(g[k])};
       else giftMeta[k]=parseGiftItems(g[k]);
     });
     saveCache(); saveGiftCache();
@@ -521,6 +521,11 @@ function updateFixedStock(catKey,name,value){
   giftMeta[catKey]=giftMeta[catKey]||{};
   giftMeta[catKey][name]=Math.max(0,Number(value)||0);
   syncGiftTier(catKey);
+}
+function updateOrderedQty(key,value){
+  giftMeta.orderedQty=giftMeta.orderedQty||{};
+  giftMeta.orderedQty[key]=Math.max(0,Number(value)||0);
+  syncGiftTier('orderedQty');
 }
 
 /* ---------- form ---------- */
@@ -834,19 +839,22 @@ function renderList(){
   }).join('');
 }
 function renderBuy(){
-  const live=orders.filter(o=>o.ship!=='已交付');
-  let tot=0;
-  const rows=P.map(p=>{
-    const all=orders.reduce((s,o)=>s+(o.items[p.id]||0),0);
-    const pend=live.reduce((s,o)=>s+(o.items[p.id]||0),0);
-    tot+=all;
-    return {p,all,pend};
-  });
-  $('#buytable').innerHTML=`<tr><th>品項</th><th class="n">未交付</th><th class="n">總訂購</th></tr>`+
-    rows.map(r=>`<tr><td>${r.p.name}<div style="font-size:11px;color:var(--ink-38)">${r.p.spec}</div></td><td class="n">${r.pend||'—'}</td><td class="n">${r.all||'—'}</td></tr>`).join('')+
-    `<tr class="tot"><td>合計瓶數</td><td class="n">${live.reduce((s,o)=>s+Object.values(o.items).reduce((a,b)=>a+b,0),0)}</td><td class="n">${tot}</td></tr>`;
-
   const cool=orders.filter(o=>o.cooler).length;
+  const rows=P.map(p=>({key:p.id,name:p.name,spec:p.spec,demand:orders.reduce((s,o)=>s+(o.items[p.id]||0),0)}));
+  rows.push({key:'__cooler__',name:'杜邦保溫冷袋',spec:'',demand:cool});
+  const ordered=giftMeta.orderedQty||{};
+  let demandTot=0, orderedTot=0, remainTot=0;
+  $('#buytable').innerHTML=`<tr><th>品項</th><th class="n">總需求</th><th class="n">已叫貨</th><th class="n">還要叫</th></tr>`+
+    rows.map(r=>{
+      const o=Number(ordered[r.key])||0;
+      const remain=Math.max(0,r.demand-o);
+      demandTot+=r.demand; orderedTot+=o; remainTot+=remain;
+      return `<tr><td>${r.name}${r.spec?`<div style="font-size:11px;color:var(--ink-38)">${r.spec}</div>`:''}</td>
+        <td class="n">${r.demand||'—'}</td>
+        <td class="n"><input type="number" min="0" value="${o}" style="width:56px;padding:6px 4px;text-align:right" onchange="updateOrderedQty('${r.key}',this.value)"></td>
+        <td class="n" style="${remain>0?'color:var(--warn);font-weight:700':''}">${remain||'—'}</td></tr>`;
+    }).join('')+
+    `<tr class="tot"><td>合計</td><td class="n">${demandTot}</td><td class="n">${orderedTot}</td><td class="n">${remainTot}</td></tr>`;
   const pickDetail=k=>{
     const {serumCounts,hydrosolCounts}=giftPickTally(k);
     const parts=Object.entries(serumCounts).map(([n,c])=>`${n}×${c}`);
