@@ -257,7 +257,7 @@ body.unlocked #lockscreen{display:none}
       <button class="chip" data-v="匯款" aria-pressed="false" onclick="pick(this,'paymethod')">匯款</button>
       <button class="chip" id="chip-linepay" data-v="LINE Pay" aria-pressed="false" onclick="pick(this,'paymethod')">LINE Pay</button>
     </div>
-    <div class="hint" id="payhint">LINE Pay 需單筆滿 8,000</div>
+    <div class="hint" id="payhint">可用 LINE Pay。無分期。</div>
 
     <label class="fl" style="margin-top:15px">狀態</label>
     <div class="chips" id="paystatus">
@@ -589,15 +589,7 @@ function drawMeter(){
   renderGiftPickSelect(T);
   renderRedeemBox();
 
-  const lp=$('#chip-linepay');
-  if(t<8000){
-    lp.disabled=true;
-    if(sel.paymethod==='LINE Pay'){sel.paymethod='';lp.setAttribute('aria-pressed','false');}
-    $('#payhint').className='hint'; $('#payhint').textContent='LINE Pay 需單筆滿 8,000';
-  }else{
-    lp.disabled=false;
-    $('#payhint').className='hint'; $('#payhint').textContent='可用 LINE Pay。無分期。';
-  }
+  $('#payhint').className='hint'; $('#payhint').textContent='可用 LINE Pay。無分期。';
 }
 function pickRemaining(name,excludeOrderId,field){
   const stock=stockQtyByName(name);
