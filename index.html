@@ -205,13 +205,24 @@ body.unlocked #lockscreen{display:none}
   <div class="card" id="plist"></div>
 
   <div class="card" id="discbox" style="display:none">
-    <label class="fl">旗艦裝折扣</label>
-    <div class="chips" id="disc-chips"></div>
-    <div id="disc-amtwrap" style="display:none;margin-top:10px">
-      <label class="fl" for="f-discamt">折讓金額（NT$）</label>
-      <input type="number" id="f-discamt" inputmode="numeric" placeholder="0" oninput="setDiscAmount(this.value)">
+    <div id="disc-flag" style="display:none">
+      <label class="fl">旗艦裝折扣</label>
+      <div class="chips" id="disc-flag-chips"></div>
+      <div id="disc-flag-amtwrap" style="display:none;margin-top:10px">
+        <label class="fl" for="f-discamt-flag">折讓金額（NT$）</label>
+        <input type="number" id="f-discamt-flag" inputmode="numeric" placeholder="0" oninput="setDiscAmount('flag',this.value)">
+      </div>
+      <div class="hint" id="disc-flag-summary"></div>
     </div>
-    <div class="hint" id="disc-summary"></div>
+    <div id="disc-reg" style="display:none">
+      <label class="fl">一般正貨折扣</label>
+      <div class="chips" id="disc-reg-chips"></div>
+      <div id="disc-reg-amtwrap" style="display:none;margin-top:10px">
+        <label class="fl" for="f-discamt-reg">折讓金額（NT$）</label>
+        <input type="number" id="f-discamt-reg" inputmode="numeric" placeholder="0" oninput="setDiscAmount('reg',this.value)">
+      </div>
+      <div class="hint" id="disc-reg-summary"></div>
+    </div>
   </div>
 
   <div class="meter" id="meter">
@@ -380,11 +391,11 @@ const P=[
  {id:'emu',step:'Step 4 舒緩萬用',name:'鴯鶓活顏油',spec:'30ml',price:3180},
  {id:'aza',step:'Step 4 痘痘・毛孔',name:'14% AZA 黃金比例精華乳',spec:'30ml',price:2180},
  {id:'clean500',flagship:true,step:'Step 1 清潔／卸妝',name:'二合一高效清潔蜜 旗艦裝',spec:'500ml',price:3880},
- {id:'probio120',flagship:true,step:'Step 2 重建／建構',name:'超能量益生源 旗艦裝',spec:'120ml',price:8800},
+ {id:'probio120',flagship:true,step:'Step 2 重建／建構',name:'益生源精萃 旗艦裝',spec:'120ml',price:8800},
  {id:'ha120',flagship:true,step:'Step 3 淺層補水',name:'4D玻尿酸精華 旗艦裝',spec:'120ml',price:4980},
  {id:'snail150',flagship:true,step:'Step 4 預防性建構',name:'蝸牛修護凝膠 旗艦裝',spec:'150ml',price:8440},
- {id:'bee120',flagship:true,step:'Step 4 亮顏嫩膚',name:'皇家蜂萃油 旗艦裝',spec:'120ml',price:6380},
- {id:'emu120',flagship:true,step:'Step 4 舒緩萬用',name:'鴯鶓金萃 旗艦裝',spec:'120ml',price:8880},
+ {id:'bee120',flagship:true,step:'Step 4 亮顏嫩膚',name:'蜂萃精華油 旗艦裝',spec:'120ml',price:6380},
+ {id:'emu120',flagship:true,step:'Step 4 舒緩萬用',name:'鴯鶓活顏油 旗艦裝',spec:'120ml',price:8880},
  {id:'aza120',flagship:true,step:'Step 4 痘痘・毛孔',name:'14% AZA 黃金比例精華乳 旗艦裝',spec:'120ml',price:4880},
 ];
 const DISC_RATES=[95,90,85,80,75,70];
@@ -408,7 +419,9 @@ let redeemCart={};
 let editingCash=0;
 let plusEnabled=false;
 let cashEnabled=false;
-let disc={type:'none',value:0};
+const noDisc=()=>({flag:{type:'none',value:0},reg:{type:'none',value:0}});
+const DISC_GROUPS=[['flag','旗艦裝'],['reg','一般正貨']];
+let disc=noDisc();
 
 function parseGiftItems(v){
   if(Array.isArray(v)) return v;
@@ -456,14 +469,33 @@ function tier(t){
   return{lv:'未達門檻',cash:0,plus:null,next:4000,need:4000-t};
 }
 const listSubtotal=()=>P.reduce((s,p)=>s+(cart[p.id]||0)*p.price,0);
-const flagSubtotal=()=>P.reduce((s,p)=>s+(p.flagship?(cart[p.id]||0)*p.price:0),0);
-function discountAmount(){
-  const f=flagSubtotal();
-  if(!f||disc.type==='none')return 0;
-  const raw=disc.type==='rate'?Math.round(f*(100-disc.value)/100):(Number(disc.value)||0);
+const groupSubtotal=g=>P.reduce((s,p)=>s+((!!p.flagship)===(g==='flag')?(cart[p.id]||0)*p.price:0),0);
+function groupDiscount(g){
+  const f=groupSubtotal(g), d=disc[g];
+  if(!f||d.type==='none')return 0;
+  const raw=d.type==='rate'?Math.round(f*(100-d.value)/100):(Number(d.value)||0);
   return Math.max(0,Math.min(f,raw));
 }
+const discountAmount=()=>groupDiscount('flag')+groupDiscount('reg');
 const subtotal=()=>listSubtotal()-discountAmount();
+function restoreDisc(o){
+  const s=o.discount||{};
+  if(s.flag||s.reg) return {flag:{...(s.flag||{type:'none',value:0})},reg:{...(s.reg||{type:'none',value:0})}};
+  const lump=grossOf(o)-o.total;
+  if(lump<=0) return noDisc();
+  const hasFlag=P.some(p=>p.flagship&&(o.items||{})[p.id]);
+  const d=noDisc();
+  d[hasFlag?'flag':'reg']={type:'amount',value:lump};
+  return d;
+}
+function discLabel(o){
+  const s=o.discount||{};
+  return DISC_GROUPS.map(([g,label])=>{
+    const d=s[g];
+    if(!d||d.type==='none')return '';
+    return d.type==='rate'?`${label} ${d.value%10?d.value:d.value/10}折`:`${label} −${nt(d.value)}`;
+  }).filter(Boolean).join('、');
+}
 const grossOf=o=>P.reduce((s,p)=>s+((o.items||{})[p.id]||0)*p.price,0);
 
 /* ---------- cloud api ---------- */
@@ -483,6 +515,7 @@ const apiUpsert=o=>apiGet({action:'upsert', id:o.id, name:o.name, contact:o.cont
   items:JSON.stringify(o.items), total:o.total, cash:o.cash, cooler:String(!!o.cooler),
   plus:o.plus||'', giftSerum:o.giftSerum||'', giftHydrosol:o.giftHydrosol||'',
   redeemItems:JSON.stringify(o.redeemItems||{}),
+  discount:JSON.stringify(o.discount||{}),
   paymethod:o.paymethod||'', paystatus:o.paystatus, deposit:o.deposit,
   ship:o.ship, note:o.note, date:o.date});
 const apiDelete=id=>apiGet({action:'delete', id});
@@ -562,33 +595,39 @@ function updateOrderedQty(key,value){
 }
 
 /* ---------- form ---------- */
-function setDiscRate(v){
-  disc=(disc.type==='rate'&&disc.value===v)?{type:'none',value:0}:{type:'rate',value:v};
+function setDiscRate(g,v){
+  disc[g]=(disc[g].type==='rate'&&disc[g].value===v)?{type:'none',value:0}:{type:'rate',value:v};
   drawMeter();
 }
-function setDiscCustom(){
-  disc=disc.type==='amount'?{type:'none',value:0}:{type:'amount',value:0};
+function setDiscCustom(g){
+  disc[g]=disc[g].type==='amount'?{type:'none',value:0}:{type:'amount',value:0};
   drawMeter();
 }
-function setDiscAmount(v){
-  disc={type:'amount',value:Math.max(0,Number(v)||0)};
+function setDiscAmount(g,v){
+  disc[g]={type:'amount',value:Math.max(0,Number(v)||0)};
   drawMeter();
 }
 function renderDiscBox(){
-  const box=$('#discbox');
-  const f=flagSubtotal();
-  if(!f){ box.style.display='none'; return; }
-  box.style.display='block';
-  $('#disc-chips').innerHTML=
-    DISC_RATES.map(v=>`<button type="button" class="chip" aria-pressed="${disc.type==='rate'&&disc.value===v}" onclick="setDiscRate(${v})">${v%10?v:v/10}折</button>`).join('')+
-    `<button type="button" class="chip" aria-pressed="${disc.type==='amount'}" onclick="setDiscCustom()">自訂折讓金額</button>`;
-  $('#disc-amtwrap').style.display=disc.type==='amount'?'block':'none';
-  const inp=$('#f-discamt');
-  if(document.activeElement!==inp) inp.value=disc.type==='amount'&&disc.value?disc.value:'';
-  const d=discountAmount();
-  $('#disc-summary').textContent=d
-    ? `旗艦裝原價 ${nt(f)}　折扣 −${nt(d)}　折後 ${nt(f-d)}`
-    : `旗艦裝原價 ${nt(f)}，尚未套用折扣`;
+  let any=false;
+  DISC_GROUPS.forEach(([g,label])=>{
+    const f=groupSubtotal(g), wrap=$('#disc-'+g);
+    if(!f){ wrap.style.display='none'; return; }
+    wrap.style.display='block';
+    wrap.style.marginTop=any?'18px':'0';
+    any=true;
+    const d=disc[g];
+    $('#disc-'+g+'-chips').innerHTML=
+      DISC_RATES.map(v=>`<button type="button" class="chip" aria-pressed="${d.type==='rate'&&d.value===v}" onclick="setDiscRate('${g}',${v})">${v%10?v:v/10}折</button>`).join('')+
+      `<button type="button" class="chip" aria-pressed="${d.type==='amount'}" onclick="setDiscCustom('${g}')">自訂折讓金額</button>`;
+    $('#disc-'+g+'-amtwrap').style.display=d.type==='amount'?'block':'none';
+    const inp=$('#f-discamt-'+g);
+    if(document.activeElement!==inp) inp.value=d.type==='amount'&&d.value?d.value:'';
+    const amt=groupDiscount(g);
+    $('#disc-'+g+'-summary').textContent=amt
+      ? `${label}原價 ${nt(f)}　折扣 −${nt(amt)}　折後 ${nt(f-amt)}`
+      : `${label}原價 ${nt(f)}，尚未套用折扣`;
+  });
+  $('#discbox').style.display=any?'block':'none';
 }
 function drawProducts(){
   let flagHeaderDone=false;
@@ -808,6 +847,10 @@ async function save(){
     giftSerum:(plus==='plus10k'||plus==='plus8k'||plus==='plus4k')?(giftPickState.giftSerum||''):'',
     giftHydrosol:plus==='plus10k'?(giftPickState.giftHydrosol||''):'',
     redeemItems:{...redeemCart},
+    discount:{
+      flag:groupSubtotal('flag')?{...disc.flag}:{type:'none',value:0},
+      reg:groupSubtotal('reg')?{...disc.reg}:{type:'none',value:0}
+    },
     paymethod:sel.paymethod, paystatus:sel.paystatus,
     deposit:sel.paystatus==='已付訂金'?Number($('#f-dep').value||0):(sel.paystatus==='已付清'?t:0),
     ship:sel.ship, note:$('#f-note').value.trim(),
@@ -827,7 +870,7 @@ function resetForm(){
   redeemCart={};editingCash=0;
   plusEnabled=plusOpen();
   cashEnabled=cashOpen();
-  disc={type:'none',value:0};
+  disc=noDisc();
   setChip('paymethod','');setChip('paystatus','未付款');setChip('ship','待叫貨');
   $('#savebtn').textContent='儲存訂單';$('#cancelbtn').style.display='none';
   drawProducts();drawMeter();renderRedeemBox();
@@ -842,8 +885,7 @@ function edit(id){
   redeemCart={...(o.redeemItems||{})};editingCash=o.cash||0;
   plusEnabled=!!o.plus;
   cashEnabled=!!o.cash;
-  const oldDisc=grossOf(o)-o.total;
-  disc=oldDisc>0?{type:'amount',value:oldDisc}:{type:'none',value:0};
+  disc=restoreDisc(o);
   setChip('paymethod',o.paymethod||'');setChip('paystatus',o.paystatus);setChip('ship',o.ship);
   $('#savebtn').textContent='更新訂單';$('#cancelbtn').style.display='block';
   tab('new');window.scrollTo({top:0,behavior:'smooth'});
@@ -897,7 +939,7 @@ function renderList(){
     const redeemOwe=redeemItemsList.length?Math.max(0,redeemTotal-(o.cash||0)):0;
     return `<div class="oc ${cls}">
       <div class="h"><span class="nm">${o.name}${o.contact?` <span style="font-size:12px;color:var(--ink-38)">${o.contact}</span>`:''}</span><span class="tt num">${nt(o.total)}</span></div>
-      ${grossOf(o)>o.total?`<div class="pprice num" style="text-align:right;margin-top:-4px">旗艦裝折扣 −${nt(grossOf(o)-o.total)}（原價 ${nt(grossOf(o))}）</div>`:''}
+      ${grossOf(o)>o.total?`<div class="pprice num" style="text-align:right;margin-top:-4px">折扣 −${nt(grossOf(o)-o.total)}（原價 ${nt(grossOf(o))}）${discLabel(o)?`　${discLabel(o)}`:''}</div>`:''}
       ${redeemItemsList.length?`<div class="pprice num" style="text-align:right;margin-top:-4px">原液純露補差價 ${nt(redeemOwe)}</div>`:''}
       <div class="items">${itemText(o)}</div>
       <div class="tags">
