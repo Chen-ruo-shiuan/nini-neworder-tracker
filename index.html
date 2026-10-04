@@ -65,6 +65,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--rose);outline-of
 /* product stepper */
 .pline{display:flex;align-items:center;gap:11px;padding:10px 0;border-bottom:1px solid var(--ink-07)}
 .pline:last-child{border-bottom:0}
+.pgroup{font-family:var(--serif);font-size:12px;font-weight:600;letter-spacing:.16em;color:var(--rose-dp);padding:16px 0 6px;margin-top:6px;border-top:1px solid var(--ink-14)}
 .pline.picked .pname{font-weight:700}
 .pinfo{flex:1;min-width:0}
 .pstep{font-size:10.5px;letter-spacing:.1em;color:var(--rose-dp);text-transform:uppercase}
@@ -202,6 +203,16 @@ body.unlocked #lockscreen{display:none}
 
   <div class="eyebrow">品項</div>
   <div class="card" id="plist"></div>
+
+  <div class="card" id="discbox" style="display:none">
+    <label class="fl">旗艦裝折扣</label>
+    <div class="chips" id="disc-chips"></div>
+    <div id="disc-amtwrap" style="display:none;margin-top:10px">
+      <label class="fl" for="f-discamt">折讓金額（NT$）</label>
+      <input type="number" id="f-discamt" inputmode="numeric" placeholder="0" oninput="setDiscAmount(this.value)">
+    </div>
+    <div class="hint" id="disc-summary"></div>
+  </div>
 
   <div class="meter" id="meter">
     <div class="top"><span class="amt num" id="m-amt">NT$0</span><span class="tier" id="m-tier">未達門檻</span></div>
@@ -368,7 +379,15 @@ const P=[
  {id:'bee',step:'Step 4 亮顏嫩膚',name:'蜂萃精華油',spec:'30ml',price:1880},
  {id:'emu',step:'Step 4 舒緩萬用',name:'鴯鶓活顏油',spec:'30ml',price:3180},
  {id:'aza',step:'Step 4 痘痘・毛孔',name:'14% AZA 黃金比例精華乳',spec:'30ml',price:2180},
+ {id:'clean500',flagship:true,step:'Step 1 清潔／卸妝',name:'二合一高效清潔蜜 旗艦裝',spec:'500ml',price:3880},
+ {id:'probio120',flagship:true,step:'Step 2 重建／建構',name:'超能量益生源 旗艦裝',spec:'120ml',price:8800},
+ {id:'ha120',flagship:true,step:'Step 3 淺層補水',name:'4D玻尿酸精華 旗艦裝',spec:'120ml',price:4980},
+ {id:'snail150',flagship:true,step:'Step 4 預防性建構',name:'蝸牛修護凝膠 旗艦裝',spec:'150ml',price:8440},
+ {id:'bee120',flagship:true,step:'Step 4 亮顏嫩膚',name:'皇家蜂萃油 旗艦裝',spec:'120ml',price:6380},
+ {id:'emu120',flagship:true,step:'Step 4 舒緩萬用',name:'鴯鶓金萃 旗艦裝',spec:'120ml',price:8880},
+ {id:'aza120',flagship:true,step:'Step 4 痘痘・毛孔',name:'14% AZA 黃金比例精華乳 旗艦裝',spec:'120ml',price:4880},
 ];
+const DISC_RATES=[95,90,85,80,75,70];
 const GIFTS={
  plus10k:{label:'95折禮券 + 旅行養膚組',quota:10},
  plus8k:{label:'98折禮券 + 原液旅行（隨機）',quota:10},
@@ -389,6 +408,7 @@ let redeemCart={};
 let editingCash=0;
 let plusEnabled=false;
 let cashEnabled=false;
+let disc={type:'none',value:0};
 
 function parseGiftItems(v){
   if(Array.isArray(v)) return v;
@@ -435,7 +455,16 @@ function tier(t){
   if(t>=4000) return{lv:'滿 4,000', cash:200, plus:'plus4k', next:8000, need:8000-t};
   return{lv:'未達門檻',cash:0,plus:null,next:4000,need:4000-t};
 }
-const subtotal=()=>P.reduce((s,p)=>s+(cart[p.id]||0)*p.price,0);
+const listSubtotal=()=>P.reduce((s,p)=>s+(cart[p.id]||0)*p.price,0);
+const flagSubtotal=()=>P.reduce((s,p)=>s+(p.flagship?(cart[p.id]||0)*p.price:0),0);
+function discountAmount(){
+  const f=flagSubtotal();
+  if(!f||disc.type==='none')return 0;
+  const raw=disc.type==='rate'?Math.round(f*(100-disc.value)/100):(Number(disc.value)||0);
+  return Math.max(0,Math.min(f,raw));
+}
+const subtotal=()=>listSubtotal()-discountAmount();
+const grossOf=o=>P.reduce((s,p)=>s+((o.items||{})[p.id]||0)*p.price,0);
 
 /* ---------- cloud api ---------- */
 function sheetsReady(){ return SHEETS_URL && !SHEETS_URL.includes('PASTE_'); }
@@ -533,10 +562,41 @@ function updateOrderedQty(key,value){
 }
 
 /* ---------- form ---------- */
+function setDiscRate(v){
+  disc=(disc.type==='rate'&&disc.value===v)?{type:'none',value:0}:{type:'rate',value:v};
+  drawMeter();
+}
+function setDiscCustom(){
+  disc=disc.type==='amount'?{type:'none',value:0}:{type:'amount',value:0};
+  drawMeter();
+}
+function setDiscAmount(v){
+  disc={type:'amount',value:Math.max(0,Number(v)||0)};
+  drawMeter();
+}
+function renderDiscBox(){
+  const box=$('#discbox');
+  const f=flagSubtotal();
+  if(!f){ box.style.display='none'; return; }
+  box.style.display='block';
+  $('#disc-chips').innerHTML=
+    DISC_RATES.map(v=>`<button type="button" class="chip" aria-pressed="${disc.type==='rate'&&disc.value===v}" onclick="setDiscRate(${v})">${v%10?v:v/10}折</button>`).join('')+
+    `<button type="button" class="chip" aria-pressed="${disc.type==='amount'}" onclick="setDiscCustom()">自訂折讓金額</button>`;
+  $('#disc-amtwrap').style.display=disc.type==='amount'?'block':'none';
+  const inp=$('#f-discamt');
+  if(document.activeElement!==inp) inp.value=disc.type==='amount'&&disc.value?disc.value:'';
+  const d=discountAmount();
+  $('#disc-summary').textContent=d
+    ? `旗艦裝原價 ${nt(f)}　折扣 −${nt(d)}　折後 ${nt(f-d)}`
+    : `旗艦裝原價 ${nt(f)}，尚未套用折扣`;
+}
 function drawProducts(){
+  let flagHeaderDone=false;
   $('#plist').innerHTML=P.map(p=>{
     const q=cart[p.id]||0;
-    return `<div class="pline ${q?'picked':''}">
+    let head='';
+    if(p.flagship&&!flagHeaderDone){ flagHeaderDone=true; head=`<div class="pgroup">旗艦裝・大容量（原價，下方可套用折扣）</div>`; }
+    return head+`<div class="pline ${q?'picked':''}">
       <div class="pinfo">
         <div class="pstep">${p.step}</div>
         <div class="pname">${p.name}</div>
@@ -555,13 +615,14 @@ function bump(id,d){
   drawProducts(); drawMeter();
 }
 function drawMeter(){
+  renderDiscBox();
   const t=subtotal(), T=tier(t);
   $('#m-amt').textContent=nt(t);
   $('#m-tier').textContent=T.lv;
   $('#m-bar').style.width=Math.min(100,t/10000*100)+'%';
 
   if(T.next){
-    const cheap=P.filter(p=>p.price>=T.need).sort((a,b)=>a.price-b.price)[0];
+    const cheap=P.filter(p=>!p.flagship&&p.price>=T.need).sort((a,b)=>a.price-b.price)[0];
     $('#m-gap').innerHTML= T.need<=400
       ? `再 <b>${nt(T.need)}</b> 就到 ${T.next.toLocaleString()} — 補一瓶純露就過了，回饋金差很多`
       : `再 <b>${nt(T.need)}</b> 到 ${T.next.toLocaleString()}${cheap?`（加一支${cheap.name}即可）`:''}`;
@@ -766,6 +827,7 @@ function resetForm(){
   redeemCart={};editingCash=0;
   plusEnabled=plusOpen();
   cashEnabled=cashOpen();
+  disc={type:'none',value:0};
   setChip('paymethod','');setChip('paystatus','未付款');setChip('ship','待叫貨');
   $('#savebtn').textContent='儲存訂單';$('#cancelbtn').style.display='none';
   drawProducts();drawMeter();renderRedeemBox();
@@ -780,6 +842,8 @@ function edit(id){
   redeemCart={...(o.redeemItems||{})};editingCash=o.cash||0;
   plusEnabled=!!o.plus;
   cashEnabled=!!o.cash;
+  const oldDisc=grossOf(o)-o.total;
+  disc=oldDisc>0?{type:'amount',value:oldDisc}:{type:'none',value:0};
   setChip('paymethod',o.paymethod||'');setChip('paystatus',o.paystatus);setChip('ship',o.ship);
   $('#savebtn').textContent='更新訂單';$('#cancelbtn').style.display='block';
   tab('new');window.scrollTo({top:0,behavior:'smooth'});
@@ -833,6 +897,7 @@ function renderList(){
     const redeemOwe=redeemItemsList.length?Math.max(0,redeemTotal-(o.cash||0)):0;
     return `<div class="oc ${cls}">
       <div class="h"><span class="nm">${o.name}${o.contact?` <span style="font-size:12px;color:var(--ink-38)">${o.contact}</span>`:''}</span><span class="tt num">${nt(o.total)}</span></div>
+      ${grossOf(o)>o.total?`<div class="pprice num" style="text-align:right;margin-top:-4px">旗艦裝折扣 −${nt(grossOf(o)-o.total)}（原價 ${nt(grossOf(o))}）</div>`:''}
       ${redeemItemsList.length?`<div class="pprice num" style="text-align:right;margin-top:-4px">原液純露補差價 ${nt(redeemOwe)}</div>`:''}
       <div class="items">${itemText(o)}</div>
       <div class="tags">
