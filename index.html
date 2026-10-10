@@ -140,6 +140,13 @@ tr.tot td{border-bottom:0;border-top:1.5px solid var(--ink);font-weight:700;font
 .qbar .track i.low{background:var(--warn)}
 .qbar .v{width:52px;text-align:right;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
 
+.pm-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--ink-07)}
+.pm-row:last-child{border-bottom:0}
+.pm-row.off{opacity:.5}
+.pm-info{flex:1;min-width:0}
+.pm-name{font-size:14px;line-height:1.35}
+.pm-btns{display:flex;gap:6px;flex:none}
+.pm-btns button{font-size:12px;padding:6px 10px;border:1px solid var(--ink-14);background:#fff;border-radius:3px;cursor:pointer;color:var(--ink-60)}
 .gm-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
 .gm-row input[type=text]{flex:1}
 .gm-row input[type=number]{width:66px;flex:none;padding:10px 6px;text-align:center}
@@ -333,6 +340,31 @@ body.unlocked #lockscreen{display:none}
     <summary class="eyebrow">正裝庫存設定</summary>
     <div class="card" id="fullstockmeta"></div>
   </details>
+  <details id="prod-details">
+    <summary class="eyebrow">品項管理（新增／編輯／停售）</summary>
+    <div class="card">
+      <div id="prodlist"></div>
+      <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--ink-14)">
+        <label class="fl" id="prodform-title" style="font-weight:700">新增品項</label>
+        <div class="row2">
+          <div><label class="fl" for="p-name">品名</label><input type="text" id="p-name" placeholder="例：3D積雪草蝸牛面膜"></div>
+          <div><label class="fl" for="p-spec">規格／賣法</label><input type="text" id="p-spec" placeholder="例：1片、1盒10入"></div>
+        </div>
+        <div class="row2" style="margin-top:10px">
+          <div><label class="fl" for="p-price">價格（NT$）</label><input type="number" id="p-price" inputmode="numeric" placeholder="0"></div>
+          <div><label class="fl" for="p-label">分類標籤（顯示在品名上方）</label><input type="text" id="p-label" placeholder="例：面膜"></div>
+        </div>
+        <label class="fl" style="margin-top:10px">折扣歸哪一組</label>
+        <div class="chips" id="p-group">
+          <button type="button" class="chip" data-v="reg" aria-pressed="true" onclick="setPfGroup('reg')">一般正貨</button>
+          <button type="button" class="chip" data-v="flag" aria-pressed="false" onclick="setPfGroup('flag')">旗艦裝</button>
+        </div>
+        <button class="btn" id="p-save" onclick="saveProductForm()">新增品項</button>
+        <button class="btn ghost" id="p-cancel" style="display:none" onclick="resetProductForm()">取消編輯</button>
+      </div>
+      <div class="hint" style="margin-top:12px">新增後馬上出現在「登記」頁。賣過的品項不能刪除，請用「停售」（登記頁就不會再出現，舊訂單不受影響）。改價格只影響之後新登記的訂單；舊訂單如果重新編輯再儲存，會用新價格重算。</div>
+    </div>
+  </details>
   <button class="btn ghost" onclick="exportCSV()">匯出 CSV（給廠商或對帳用）</button>
 </section>
 
@@ -382,7 +414,7 @@ const GOAL=120000;
 const PLUS_END=new Date('2026-08-10T23:59:59+08:00');
 const CASH_END=new Date('2026-08-28T23:59:59+08:00');
 
-const P=[
+const BASE_P=[
  {id:'clean',step:'Step 1 清潔／卸妝',name:'二合一高效清潔蜜',spec:'150ml',price:1480},
  {id:'probio',step:'Step 2 重建／建構',name:'益生源精萃',spec:'30ml',price:2680},
  {id:'ha',step:'Step 3 淺層補水',name:'4D玻尿酸精華',spec:'30ml',price:1700},
@@ -398,6 +430,16 @@ const P=[
  {id:'emu120',flagship:true,step:'Step 4 舒緩萬用',name:'鴯鶓活顏油 旗艦裝',spec:'120ml',price:8880},
  {id:'aza120',flagship:true,step:'Step 4 痘痘・毛孔',name:'14% AZA 黃金比例精華乳 旗艦裝',spec:'120ml',price:4880},
 ];
+const P=[];
+function rebuildP(){
+  const hid=new Set(giftMeta.hiddenProducts||[]);
+  const base=BASE_P.map(p=>({...p,hidden:hid.has(p.id)}));
+  const custom=(giftMeta.customProducts||[]).filter(c=>c&&c.id&&c.name).map(c=>({
+    id:c.id,step:c.label||'其他',name:c.name,spec:c.spec||'',price:Number(c.price)||0,
+    flagship:c.group==='flag',custom:true,hidden:!!c.hidden}));
+  const part=f=>[...base.filter(p=>!!p.flagship===f),...custom.filter(p=>p.flagship===f)];
+  P.length=0; P.push(...part(false),...part(true));
+}
 const DISC_RATES=[95,90,85,80,75,70];
 const GIFTS={
  plus10k:{label:'95折禮券 + 旅行養膚組',quota:10},
@@ -411,7 +453,7 @@ const HYDROSOL_FULL_PRICE={'洋甘菊':550,'千葉玫瑰':550,'桂花':550,'橙�
 const FULL_ITEMS=[...SERUMS.map(n=>({name:n,price:SERUM_FULL_PRICE[n],cat:'serum',spec:'原液 30ml'})), ...HYDROSOLS.map(n=>({name:n,price:HYDROSOL_FULL_PRICE[n],cat:'hydrosol',spec:'純露 100ml'}))];
 
 let orders=[], cart={}, editId=null;
-let giftMeta={plus10k:[],cooler:[],stock:[],serumStock:{},hydrosolStock:{},serumStockFull:{},hydrosolStockFull:{},orderedQty:{}};
+let giftMeta={plus10k:[],cooler:[],stock:[],serumStock:{},hydrosolStock:{},serumStockFull:{},hydrosolStockFull:{},orderedQty:{},customProducts:[],hiddenProducts:[]};
 let sel={paymethod:'',paystatus:'未付款',ship:'待叫貨'};
 let giftPickState={giftSerum:'',giftHydrosol:''};
 let checkedFixedItems=new Set();
@@ -440,6 +482,7 @@ function giftItemsText(items){
 }
 
 const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const nt=n=>'NT$'+Number(n||0).toLocaleString('en-US');
 const plusOpen=()=>new Date()<=PLUS_END;
 const cashOpen=()=>new Date()<=CASH_END;
@@ -550,7 +593,7 @@ async function syncFromCloud(){
   try{
     const [os,g]=await Promise.all([apiListOrders(), apiListGift()]);
     orders=os.sort((a,b)=>new Date(b.date)-new Date(a.date));
-    Object.keys(g).forEach(k=>{
+    if(pendingGiftSaves===0) Object.keys(g).forEach(k=>{
       if(k==='serumStock'||k==='hydrosolStock'||k==='serumStockFull'||k==='hydrosolStockFull'||k==='orderedQty') giftMeta[k]={...giftMeta[k],...parseGiftMap(g[k])};
       else giftMeta[k]=parseGiftItems(g[k]);
     });
@@ -562,11 +605,18 @@ async function syncFromCloud(){
     t.classList.add('bad');
   }
 }
-async function syncGiftTier(k){
+const giftSaveChain={};
+let pendingGiftSaves=0;
+function syncGiftTier(k){
   saveGiftCache();
   renderBuy(); drawMeter();
-  try{ await apiSaveGift(k, JSON.stringify(giftMeta[k]||[])); }
-  catch(e){ toast('雲端同步失敗，請檢查網路'); }
+  pendingGiftSaves++;
+  giftSaveChain[k]=(giftSaveChain[k]||Promise.resolve()).then(async()=>{
+    try{ await apiSaveGift(k, JSON.stringify(giftMeta[k]||[])); }
+    catch(e){ toast('雲端同步失敗，請檢查網路'); }
+    finally{ pendingGiftSaves--; }
+  });
+  return giftSaveChain[k];
 }
 function addGiftItem(k){
   giftMeta[k]=giftMeta[k]||[];
@@ -633,13 +683,14 @@ function drawProducts(){
   let flagHeaderDone=false;
   $('#plist').innerHTML=P.map(p=>{
     const q=cart[p.id]||0;
+    if(p.hidden&&!q) return '';
     let head='';
     if(p.flagship&&!flagHeaderDone){ flagHeaderDone=true; head=`<div class="pgroup">旗艦裝・大容量（原價，下方可套用折扣）</div>`; }
     return head+`<div class="pline ${q?'picked':''}">
       <div class="pinfo">
-        <div class="pstep">${p.step}</div>
-        <div class="pname">${p.name}</div>
-        <div class="pprice num">${p.spec}・${nt(p.price)}</div>
+        <div class="pstep">${esc(p.step)}</div>
+        <div class="pname">${esc(p.name)}</div>
+        <div class="pprice num">${esc(p.spec)}・${nt(p.price)}${p.hidden?'・已停售':''}</div>
       </div>
       <div class="stp">
         <button onclick="bump('${p.id}',-1)" ${q?'':'disabled'} aria-label="減少">−</button>
@@ -661,7 +712,7 @@ function drawMeter(){
   $('#m-bar').style.width=Math.min(100,t/10000*100)+'%';
 
   if(T.next){
-    const cheap=P.filter(p=>!p.flagship&&p.price>=T.need).sort((a,b)=>a.price-b.price)[0];
+    const cheap=P.filter(p=>!p.flagship&&!p.hidden&&p.price>=T.need).sort((a,b)=>a.price-b.price)[0];
     $('#m-gap').innerHTML= T.need<=400
       ? `再 <b>${nt(T.need)}</b> 就到 ${T.next.toLocaleString()} — 補一瓶純露就過了，回饋金差很多`
       : `再 <b>${nt(T.need)}</b> 到 ${T.next.toLocaleString()}${cheap?`（加一支${cheap.name}即可）`:''}`;
@@ -923,7 +974,7 @@ async function quickPaid(id){
 const used=k=>orders.filter(o=>o.plus===k).length;
 
 function itemText(o){
-  return P.filter(p=>o.items[p.id]).map(p=>`${p.name}×${o.items[p.id]}`).join('・');
+  return P.filter(p=>o.items[p.id]).map(p=>`${esc(p.custom&&p.spec?`${p.name} ${p.spec}`:p.name)}×${o.items[p.id]}`).join('・');
 }
 function renderList(){
   const q=($('#q').value||'').trim().toLowerCase();
@@ -961,16 +1012,16 @@ function renderList(){
 }
 function renderBuy(){
   const cool=orders.filter(o=>o.cooler).length;
-  const rows=P.map(p=>({key:p.id,name:p.name,spec:p.spec,demand:orders.reduce((s,o)=>s+(o.items[p.id]||0),0)}));
+  const rows=P.map(p=>({key:p.id,name:p.name,spec:p.spec,hidden:!!p.hidden,demand:orders.reduce((s,o)=>s+(o.items[p.id]||0),0)}));
   rows.push({key:'__cooler__',name:'杜邦保溫冷袋',spec:'',demand:cool});
   const ordered=giftMeta.orderedQty||{};
   let demandTot=0, orderedTot=0, remainTot=0;
   $('#buytable').innerHTML=`<tr><th>品項</th><th class="n">總需求</th><th class="n">已叫貨</th><th class="n">還要叫</th></tr>`+
-    rows.map(r=>{
+    rows.filter(r=>!r.hidden||r.demand>0||(Number(ordered[r.key])||0)>0).map(r=>{
       const o=Number(ordered[r.key])||0;
       const remain=Math.max(0,r.demand-o);
       demandTot+=r.demand; orderedTot+=o; remainTot+=remain;
-      return `<tr><td>${r.name}${r.spec?`<div style="font-size:11px;color:var(--ink-38)">${r.spec}</div>`:''}</td>
+      return `<tr><td>${esc(r.name)}${r.spec?`<div style="font-size:11px;color:var(--ink-38)">${esc(r.spec)}</div>`:''}</td>
         <td class="n">${r.demand||'—'}</td>
         <td class="n"><input type="number" min="0" value="${o}" style="width:56px;padding:6px 4px;text-align:right" onchange="updateOrderedQty('${r.key}',this.value)"></td>
         <td class="n" style="${remain>0?'color:var(--warn);font-weight:700':''}">${remain||'—'}</td></tr>`;
@@ -1131,7 +1182,81 @@ function renderSum(){
   $('#redeemsum').innerHTML=`<div style="font-size:22px;font-weight:700" class="num">${nt(redeemTotal)}</div>
     <div style="font-size:12.5px;color:var(--ink-60);margin-top:5px">保養品 ${nt(t)}　+　原液純露 ${nt(redeemTotal)}　−　回饋金 ${nt(cb)}　＝　實際進帳約 <b style="color:var(--ink)">${nt(net)}</b></div>`;
 }
-function renderAll(){drawProducts();drawMeter();renderList();renderBuy();renderSum();}
+/* ---------- 品項管理 ---------- */
+let editingProdId=null, pfGroup='reg';
+function setPfGroup(g){
+  pfGroup=g;
+  document.querySelectorAll('#p-group .chip').forEach(c=>c.setAttribute('aria-pressed',String(c.dataset.v===g)));
+}
+function resetProductForm(){
+  editingProdId=null;
+  ['#p-name','#p-spec','#p-price','#p-label'].forEach(s=>{ $(s).value=''; });
+  setPfGroup('reg');
+  $('#prodform-title').textContent='新增品項';
+  $('#p-save').textContent='新增品項';
+  $('#p-cancel').style.display='none';
+}
+function commitCatalog(key){
+  rebuildP(); renderAll(); syncGiftTier(key);
+}
+function saveProductForm(){
+  const name=$('#p-name').value.trim(), spec=$('#p-spec').value.trim(), label=$('#p-label').value.trim(), price=Number($('#p-price').value);
+  if(!name){ toast('先填品名'); $('#p-name').focus(); return; }
+  if(!(price>0)){ toast('價格要大於 0'); $('#p-price').focus(); return; }
+  const list=giftMeta.customProducts=giftMeta.customProducts||[];
+  const wasEdit=!!editingProdId;
+  if(wasEdit){
+    const c=list.find(x=>x.id===editingProdId);
+    if(c) Object.assign(c,{name,spec,label,price,group:pfGroup});
+  }else{
+    list.push({id:'c'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),name,spec,label,price,group:pfGroup,hidden:false});
+  }
+  resetProductForm();
+  commitCatalog('customProducts');
+  toast(wasEdit?'已更新品項':'已新增品項');
+}
+function editProduct(id){
+  const c=(giftMeta.customProducts||[]).find(x=>x.id===id);
+  if(!c) return;
+  editingProdId=id;
+  $('#p-name').value=c.name; $('#p-spec').value=c.spec||''; $('#p-price').value=c.price; $('#p-label').value=c.label||'';
+  setPfGroup(c.group||'reg');
+  $('#prodform-title').textContent='編輯品項';
+  $('#p-save').textContent='儲存修改';
+  $('#p-cancel').style.display='block';
+  $('#p-name').scrollIntoView({behavior:'smooth',block:'center'});
+}
+function toggleProductHidden(id){
+  const c=(giftMeta.customProducts||[]).find(x=>x.id===id);
+  if(c){ c.hidden=!c.hidden; commitCatalog('customProducts'); return; }
+  const h=giftMeta.hiddenProducts=giftMeta.hiddenProducts||[];
+  const i=h.indexOf(id);
+  if(i>=0) h.splice(i,1); else h.push(id);
+  commitCatalog('hiddenProducts');
+}
+function deleteProduct(id){
+  if(orders.some(o=>(o.items||{})[id])){ toast('已經有訂單買過，不能刪除，請改用「停售」'); return; }
+  if(!confirm('確定刪掉這個品項？')) return;
+  giftMeta.customProducts=(giftMeta.customProducts||[]).filter(x=>x.id!==id);
+  if(editingProdId===id) resetProductForm();
+  commitCatalog('customProducts');
+}
+function renderProductManager(){
+  $('#prodlist').innerHTML=P.map(p=>{
+    const bought=orders.some(o=>(o.items||{})[p.id]);
+    const btns=[`<button onclick="toggleProductHidden('${p.id}')">${p.hidden?'重新上架':'停售'}</button>`];
+    if(p.custom){
+      btns.unshift(`<button onclick="editProduct('${p.id}')">編輯</button>`);
+      if(!bought) btns.push(`<button onclick="deleteProduct('${p.id}')">刪除</button>`);
+    }
+    return `<div class="pm-row ${p.hidden?'off':''}">
+      <div class="pm-info"><div class="pm-name">${esc(p.name)}</div>
+        <div class="pprice num">${esc(p.spec)}・${nt(p.price)}${p.flagship?'・旗艦裝':''}${p.custom?'・自訂':''}${p.hidden?'・已停售':''}</div></div>
+      <div class="pm-btns">${btns.join('')}</div></div>`;
+  }).join('');
+}
+
+function renderAll(){rebuildP();drawProducts();drawMeter();renderList();renderBuy();renderSum();renderProductManager();}
 
 function exportCSV(){
   const head=['日期','姓名','聯絡','金額','付款方式','付款狀態','已收','出貨','回饋金','冷袋','加一回饋','贈送原液','贈送純露','備註',...P.map(p=>p.name)];
@@ -1169,7 +1294,7 @@ let tmr;function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('o
     const d=Math.ceil((PLUS_END-new Date())/86400000);
     f.textContent=`加一回饋進行中・還剩 ${d} 天（8/10 收單）`;
   }else{f.className='plusflag off';f.textContent='加一回饋已結束・現在只給基本回饋金';}
-  drawProducts();drawMeter();load();
+  rebuildP();drawProducts();drawMeter();load();
   setInterval(()=>{ if(document.visibilityState==='visible') syncFromCloud(); }, 25000);
   document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') syncFromCloud(); });
 })();
