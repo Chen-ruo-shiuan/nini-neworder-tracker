@@ -57,7 +57,7 @@ summary.eyebrow::-webkit-details-marker{display:none}
 summary.eyebrow::before{content:"▸";font-size:10px;color:var(--rose-dp)}
 details[open] summary.eyebrow::before{content:"▾"}
 label.fl{display:block;font-size:12px;letter-spacing:.06em;color:var(--ink-60);margin-bottom:5px}
-input[type=text],input[type=number],textarea,select{width:100%;font-family:var(--sans);font-size:16px;color:var(--ink);background:#fff;border:1px solid var(--ink-14);border-radius:3px;padding:10px 11px}
+input[type=text],input[type=number],input[type=date],textarea,select{width:100%;font-family:var(--sans);font-size:16px;color:var(--ink);background:#fff;border:1px solid var(--ink-14);border-radius:3px;padding:10px 11px}
 textarea{min-height:62px;resize:vertical;font-size:15px}
 input:focus,textarea:focus,select:focus{outline:2px solid var(--rose);outline-offset:1px;border-color:transparent}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -109,6 +109,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--rose);outline-of
 .oc .h{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
 .oc .nm{font-family:var(--serif);font-size:16px;font-weight:600}
 .oc .tt{font-size:16px;font-weight:700}
+.oc .osub{font-size:12px;color:var(--ink-38);margin-top:1px}
 .oc .items{font-size:12.5px;color:var(--ink-60);margin-top:5px;line-height:1.55}
 .tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
 .tag{font-size:11px;letter-spacing:.04em;padding:3px 8px;border-radius:2px;background:var(--ink-07);color:var(--ink-60)}
@@ -206,6 +207,11 @@ body.unlocked #lockscreen{display:none}
   <div class="row2">
     <div><label class="fl" for="f-name">姓名</label><input type="text" id="f-name" placeholder="王小姐"></div>
     <div><label class="fl" for="f-contact">IG / LINE</label><input type="text" id="f-contact" placeholder="@帳號"></div>
+  </div>
+  <div style="margin-top:10px">
+    <label class="fl" for="f-date">訂單日期</label>
+    <input type="date" id="f-date" onchange="onDateChange()">
+    <div class="hint" id="date-hint"></div>
   </div>
 
   <div class="eyebrow">品項</div>
@@ -486,6 +492,40 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;'
 const nt=n=>'NT$'+Number(n||0).toLocaleString('en-US');
 const plusOpen=()=>new Date()<=PLUS_END;
 const cashOpen=()=>new Date()<=CASH_END;
+const pad2=n=>String(n).padStart(2,'0');
+const ymdOf=d=>`${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+const todayYMD=()=>ymdOf(new Date());
+const atNoon=ymd=>new Date(`${ymd}T12:00:00+08:00`);
+const plusOpenOn=ymd=>atNoon(ymd)<=PLUS_END;
+const cashOpenOn=ymd=>atNoon(ymd)<=CASH_END;
+const mdOf=ymd=>`${+ymd.slice(5,7)}/${+ymd.slice(8,10)}`;
+function fmtOrderDate(iso){
+  const d=new Date(iso);
+  if(isNaN(d)) return '';
+  const y=d.getFullYear()!==new Date().getFullYear()?`${d.getFullYear()}/`:'';
+  return `${y}${d.getMonth()+1}/${d.getDate()}（${'日一二三四五六'[d.getDay()]}）${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+let orderYMD='', plusTouched=false, cashTouched=false;
+function renderDateHint(){
+  $('#date-hint').textContent=editId
+    ? '編輯舊單：改日期會更新這張單的登記日期'
+    : (orderYMD===todayYMD() ? '今天登記。補登記以前的單，可以改成當時的日期' : `補登記：這筆單會記成 ${mdOf(orderYMD)}`);
+}
+function resetOrderDate(){
+  orderYMD=todayYMD();
+  const f=$('#f-date'); f.value=orderYMD; f.max=orderYMD;
+  plusTouched=false; cashTouched=false;
+  plusEnabled=plusOpenOn(orderYMD); cashEnabled=cashOpenOn(orderYMD);
+  renderDateHint();
+}
+function onDateChange(){
+  orderYMD=$('#f-date').value||todayYMD();
+  if(!editId){
+    if(!plusTouched) plusEnabled=plusOpenOn(orderYMD);
+    if(!cashTouched) cashEnabled=cashOpenOn(orderYMD);
+  }
+  renderDateHint(); drawMeter();
+}
 
 /* ---------- lock screen ---------- */
 function tryUnlock(){
@@ -822,11 +862,11 @@ function renderRedeemBox(){
   }
 }
 function togglePlusEnabled(){
-  plusEnabled=!plusEnabled;
+  plusEnabled=!plusEnabled; plusTouched=true;
   drawMeter();
 }
 function toggleCashEnabled(){
-  cashEnabled=!cashEnabled;
+  cashEnabled=!cashEnabled; cashTouched=true;
   drawMeter();
 }
 function renderPlusBox(T){
@@ -842,13 +882,18 @@ function renderPlusBox(T){
   plusChip.setAttribute('aria-pressed',String(plusEnabled));
   $('#chip-plusenable-label').textContent=GIFTS[T.plus].label;
 
+  if(editId){
+    $('#plusbox-hint').textContent='編輯舊單：維持這張單原本記錄的回饋狀態，需要調整就點按鈕。';
+    return;
+  }
+  const md=mdOf(orderYMD||todayYMD());
   const hints=[];
-  hints.push(cashOpen()
-    ? '回饋金活動到 8/28，預設會給，點「回饋金」按鈕可取消。'
-    : '已過 8/28 回饋金活動期間，預設不會給——如果要手動給這位客人，點一下「回饋金」按鈕開啟。');
-  hints.push(plusOpen()
-    ? '加一回饋到 8/10，預設會給，點「加一回饋」按鈕可取消。'
-    : '已過 8/10 加一回饋期間，預設不會給——如果要手動給這位客人，點一下「加一回饋」按鈕開啟。');
+  hints.push(cashOpenOn(orderYMD||todayYMD())
+    ? `訂單日期 ${md} 在回饋金活動期間內（到 8/28），預設會給，點「回饋金」按鈕可取消。`
+    : `訂單日期 ${md} 已過 8/28 回饋金活動期間，預設不會給——如果要手動給這位客人，點一下「回饋金」按鈕開啟。`);
+  hints.push(plusOpenOn(orderYMD||todayYMD())
+    ? `訂單日期 ${md} 在加一回饋期間內（到 8/10），預設會給，點「加一回饋」按鈕可取消。`
+    : `訂單日期 ${md} 已過 8/10 加一回饋期間，預設不會給——如果要手動給這位客人，點一下「加一回饋」按鈕開啟。`);
   $('#plusbox-hint').textContent=hints.join('　');
 }
 function renderGiftPickSelect(T){
@@ -889,6 +934,15 @@ async function save(){
   if(!t){toast('還沒選任何品項');return;}
   const T=tier(t);
   const plus=(T.plus&&plusEnabled)?T.plus:null;
+  const chosenYMD=$('#f-date').value||todayYMD();
+  const prevISO=editId?(orders.find(x=>x.id===editId)||{}).date:null;
+  let dateISO;
+  if(prevISO&&!isNaN(new Date(prevISO))&&ymdOf(new Date(prevISO))===chosenYMD){
+    dateISO=prevISO;
+  }else{
+    const b=(prevISO&&!isNaN(new Date(prevISO)))?new Date(prevISO):new Date();
+    dateISO=new Date(`${chosenYMD}T${pad2(b.getHours())}:${pad2(b.getMinutes())}:${pad2(b.getSeconds())}`).toISOString();
+  }
   const o={
     id:editId||('o'+Date.now()),
     name, contact:$('#f-contact').value.trim(),
@@ -905,9 +959,10 @@ async function save(){
     paymethod:sel.paymethod, paystatus:sel.paystatus,
     deposit:sel.paystatus==='已付訂金'?Number($('#f-dep').value||0):(sel.paystatus==='已付清'?t:0),
     ship:sel.ship, note:$('#f-note').value.trim(),
-    date:editId?(orders.find(x=>x.id===editId)||{}).date||new Date().toISOString():new Date().toISOString()
+    date:dateISO
   };
   if(editId){orders=orders.map(x=>x.id===editId?o:x);}else{orders.unshift(o);}
+  orders.sort((a,b)=>new Date(b.date)-new Date(a.date));
   saveCache();
   toast(editId?'已更新':'已登記　'+nt(t));
   resetForm(); renderAll();
@@ -919,8 +974,7 @@ function resetForm(){
   giftPickState={giftSerum:'',giftHydrosol:''};
   checkedFixedItems=new Set();
   redeemCart={};editingCash=0;
-  plusEnabled=plusOpen();
-  cashEnabled=cashOpen();
+  resetOrderDate();
   disc=noDisc();
   setChip('paymethod','');setChip('paystatus','未付款');setChip('ship','待叫貨');
   $('#savebtn').textContent='儲存訂單';$('#cancelbtn').style.display='none';
@@ -936,6 +990,13 @@ function edit(id){
   redeemCart={...(o.redeemItems||{})};editingCash=o.cash||0;
   plusEnabled=!!o.plus;
   cashEnabled=!!o.cash;
+  plusTouched=true; cashTouched=true;
+  {
+    const od=new Date(o.date);
+    orderYMD=isNaN(od)?todayYMD():ymdOf(od);
+    const df=$('#f-date'); df.value=orderYMD; df.max=todayYMD();
+    renderDateHint();
+  }
   disc=restoreDisc(o);
   setChip('paymethod',o.paymethod||'');setChip('paystatus',o.paystatus);setChip('ship',o.ship);
   $('#savebtn').textContent='更新訂單';$('#cancelbtn').style.display='block';
@@ -978,7 +1039,7 @@ function itemText(o){
 }
 function renderList(){
   const q=($('#q').value||'').trim().toLowerCase();
-  const rows=orders.filter(o=>!q||(o.name+o.contact+o.note).toLowerCase().includes(q));
+  const rows=orders.filter(o=>!q||(o.name+o.contact+o.note+fmtOrderDate(o.date)).toLowerCase().includes(q));
   if(!rows.length){
     $('#listbox').innerHTML=`<div class="empty"><b>${orders.length?'沒有符合的訂單':'還沒有訂單'}</b>${orders.length?'換個關鍵字試試':'到「登記」分頁記下第一筆'}</div>`;return;
   }
@@ -989,7 +1050,7 @@ function renderList(){
     const redeemTotal=redeemItemsList.reduce((s,n)=>s+(Number(o.redeemItems[n])||0)*fullPriceByName(n),0);
     const redeemOwe=redeemItemsList.length?Math.max(0,redeemTotal-(o.cash||0)):0;
     return `<div class="oc ${cls}">
-      <div class="h"><span class="nm">${o.name}${o.contact?` <span style="font-size:12px;color:var(--ink-38)">${o.contact}</span>`:''}</span><span class="tt num">${nt(o.total)}</span></div>
+      <div class="h"><div><span class="nm">${o.name}${o.contact?` <span style="font-size:12px;color:var(--ink-38)">${o.contact}</span>`:''}</span><div class="osub num">${fmtOrderDate(o.date)}</div></div><span class="tt num">${nt(o.total)}</span></div>
       ${grossOf(o)>o.total?`<div class="pprice num" style="text-align:right;margin-top:-4px">折扣 −${nt(grossOf(o)-o.total)}（原價 ${nt(grossOf(o))}）${discLabel(o)?`　${discLabel(o)}`:''}</div>`:''}
       ${redeemItemsList.length?`<div class="pprice num" style="text-align:right;margin-top:-4px">原液純露補差價 ${nt(redeemOwe)}</div>`:''}
       <div class="items">${itemText(o)}</div>
@@ -1294,7 +1355,7 @@ let tmr;function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('o
     const d=Math.ceil((PLUS_END-new Date())/86400000);
     f.textContent=`加一回饋進行中・還剩 ${d} 天（8/10 收單）`;
   }else{f.className='plusflag off';f.textContent='加一回饋已結束・現在只給基本回饋金';}
-  rebuildP();drawProducts();drawMeter();load();
+  resetOrderDate();rebuildP();drawProducts();drawMeter();load();
   setInterval(()=>{ if(document.visibilityState==='visible') syncFromCloud(); }, 25000);
   document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') syncFromCloud(); });
 })();
